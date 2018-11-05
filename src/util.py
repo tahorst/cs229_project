@@ -6,6 +6,7 @@ import csv
 import os
 import re
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -84,7 +85,10 @@ def load_genome(path=None):
         path (str): path to genome file, if None, defaults to ANNOTATION_FILE
 
     Returns:
-        dict (str: dict): keys are gene names, subkeys are {locus: str, start: int, end: int}
+        genes (array of str): gene names
+        locus_tags (array of str): locus tag names
+        starts (array of int): genome position of start of gene
+        ends (array of int): genome position of end of gene
     '''
 
     # Set defaults
@@ -95,7 +99,13 @@ def load_genome(path=None):
     with open(path) as f:
         data = f.read()
 
-    genome = {}
+    # Initialize data structures to return
+    genes = []
+    locus_tags = []
+    starts = []
+    ends = []
+
+    # Read in each gene and pull out relevant information
     for gene in data.split('\n>'):
         locus = re.findall('\[locus_tag=(.*?)\]', gene)[0]
         gene_name = re.findall('\[gene=(.*?)\]', gene)[0]
@@ -108,11 +118,78 @@ def load_genome(path=None):
             dir = 1
         start, end = (dir * int(pos) for pos in re.findall('([0-9]*)\.\.([0-9]*)', location)[0])
 
-        d = {}
-        d['locus'] = locus
-        d['start'] = start
-        d['end'] = end
+        genes.append(gene_name)
+        locus_tags.append(locus)
+        starts.append(start)
+        ends.append(end)
 
-        genome[gene_name] = d
+    genes = np.array(genes)
+    locus_tags = np.array(locus_tags)
+    starts = np.array(starts)
+    ends = np.array(ends)
 
-    return genome
+    sort_idx = np.argsort(starts)
+
+    return genes[sort_idx], locus_tags[sort_idx], starts[sort_idx], ends[sort_idx]
+
+def plot_reads(start, end, genes, starts, ends, reads, path=None):
+    '''
+    Plots the reads of the 3' and 5' data on the given strand.  Also shows any
+    genes that start or finish within the specified region.
+
+    Args:
+        start (int): start position in the genome
+        end (int): end position in the genome
+        genes (array of str): names of genes
+        starts (array of int): start position for each gene
+        ends (array of int): end position for each gene
+        reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+        path (str): path to save image, if None, just displays image to screen
+    '''
+
+    # Set forward (0) or reverse (1) strand to correspond to data order
+    if start < 0:
+        strand = 1
+    else:
+        strand = 0
+
+    # Identify genes in region and get reads
+    # Need to subtract 1 from index for reads since starts at 0 not 1 like genome position
+    if strand:
+        # Reverse strand needs indices adjusted
+        mask = (-ends > -start) & (-starts < -end)
+        loc = np.arange(end, start)
+        threeprime = np.log(reads[strand, int(-start-1):int(-end-1)][::-1])
+        fiveprime = np.log(reads[2+strand, int(-start-1):int(-end-1)][::-1])
+    else:
+        # Forward strand
+        mask = (ends > start) & (starts < end)
+        loc = np.arange(start, end)
+        threeprime = np.log(reads[strand, int(start-1):int(end-1)])
+        fiveprime = np.log(reads[2+strand, int(start-1):int(end-1)])
+
+    genes = genes[mask]
+    starts = starts[mask]
+    ends = ends[mask]
+
+    # Adjust for 0 reads from log
+    threeprime[threeprime < 0] = -1
+    fiveprime[fiveprime < 0] = -1
+
+    plt.figure()
+    plt.step(loc, np.vstack((threeprime, fiveprime)).T, linewidth=0.25)
+
+    gene_line = -1.5
+    gene_offset = 0.1
+    for gene, s, e in zip(genes, starts, ends):
+        plt.plot([s, e], [gene_line, gene_line], 'k')
+        plt.plot([s, s], [gene_line-gene_offset, gene_line+gene_offset], 'k')
+        plt.plot([e, e], [gene_line-gene_offset, gene_line+gene_offset], 'k')
+        plt.text((s+e)/2, gene_line-3*gene_offset, gene, ha='center', fontsize=6)
+    plt.xlim([loc[0], loc[-1]])
+
+    if path is None:
+        plt.show()
+    else:
+        plt.savefig(path)
