@@ -9,21 +9,26 @@ import re
 import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-RAW_DIR = os.path.join(PROJECT_ROOT, 'data', 'raw')
+DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
+RAW_DIR = os.path.join(DATA_DIR, 'raw')
 
 # .wig files from Lalanne et al
 WIG_FILE = os.path.join(RAW_DIR, 'GSM2971252_Escherichia_coli_WT_Rend_seq_5_exo_MOPS_comp_25s_frag_pooled_{}_no_shadow.wig')
+PROCESSED_FILE = os.path.join(DATA_DIR, 'GSM2971252_reads.npy')
 WIG_STRANDS = ['3f', '3r', '5f', '5r']
 
 # Genome information
 GENOME_SIZE = 4639675
 ANNOTATION_FILE = os.path.join(RAW_DIR, 'U00096.2.faa')
 
-def load_wigs(wig_file=None, strands=None, genome_size=None):
+def load_wigs(cached=None, wig_file=None, strands=None, genome_size=None):
     '''
-    Loads read data from .wig files.
+    Loads read data from .wig files
 
     Inputs:
+        cached (str): path to cached data, if None, defaults to PROCESSED_FILE.
+            If file exists, it will be read, otherwise data will be loaded from
+            the raw data and written to file.
         wig_file (str): template for the wig files to be read (gets formatted for each strand),
             if None, defaults to WIG_FILE
         strands (list of str): each strand name that gets inserted into the wig_file string
@@ -33,6 +38,13 @@ def load_wigs(wig_file=None, strands=None, genome_size=None):
 
     Returns 2D array of floats (4 x genome_size) for reads on each strand
     '''
+
+    # Check for cached results and return if exists
+    if cached is None:
+        cached = PROCESSED_FILE
+    if os.path.exists(cached):
+        print('Loaded cached read data')
+        return np.load(cached)
 
     # Defaults in file for E. coli if none given
     if wig_file is None:
@@ -59,6 +71,8 @@ def load_wigs(wig_file=None, strands=None, genome_size=None):
             reads = np.array(d[:, 1], dtype=float)
 
             data[i, index] = reads
+
+    np.save(cached, data)
 
     return data
 
