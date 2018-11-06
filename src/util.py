@@ -193,3 +193,63 @@ def plot_reads(start, end, genes, starts, ends, reads, path=None):
         plt.show()
     else:
         plt.savefig(path)
+    plt.close('all')
+
+def plot_gene_distribution(gene, genes, starts, ends, reads, path=None):
+    '''
+    Plot read distributions for the length of the specified gene.
+
+    Args:
+        gene (str): name of the gene to get distribution for
+        genes (array of str): names of genes
+        starts (array of int): start position for each gene
+        ends (array of int): end position for each gene
+        reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+        path (str): path to save image, if None, just displays image to screen
+    '''
+
+    idx = np.where(genes == gene)
+    start = starts[idx]
+    end = ends[idx]
+
+    plot_distribution(gene, start, end, reads, path)
+
+def plot_distribution(label, start, end, reads, path=None):
+    '''
+    Plot read distributions for the specified length of the genome.
+
+    Args:
+        label (str): name of the gene to get distribution for
+        start (int): starting genome position
+        end (int): ending genome position
+        reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+        path (str): path to save image, if None, just displays image to screen
+    '''
+
+    # Get read data
+    if start < 0:
+        threeprime = reads[1, int(-start-1):int(-end-1)]
+        fiveprime = reads[3, int(-start-1):int(-end-1)]
+    else:
+        threeprime = reads[0, int(start-1):int(end-1)]
+        fiveprime = reads[2, int(start-1):int(end-1)]
+
+    bins = range(int(np.max((fiveprime, threeprime))) + 1)
+    plt.figure()
+    ax = plt.subplot(2,1,1)
+    plt.title(label)
+    ax.hist(threeprime, bins=bins)
+    ax.set_ylabel("3' Counts")
+    ax = plt.subplot(2,1,2)
+    ax.hist(fiveprime, bins=bins)
+    ax.set_ylabel("5' Counts")
+
+    plt.xlabel('Reads')
+
+    if path is None:
+        plt.show()
+    else:
+        plt.savefig(path)
+    plt.close('all')
