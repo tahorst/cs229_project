@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'output')
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 RAW_DIR = os.path.join(DATA_DIR, 'raw')
 
