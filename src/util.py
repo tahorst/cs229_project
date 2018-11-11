@@ -209,7 +209,7 @@ def get_region_bounds(region, fwd_strand):
     # Hardcoded for first operon
     return 50, 5500
 
-def plot_reads(start, end, genes, starts, ends, reads, path=None):
+def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     '''
     Plots the reads of the 3' and 5' data on the given strand.  Also shows any
     genes that start or finish within the specified region.
@@ -256,6 +256,9 @@ def plot_reads(start, end, genes, starts, ends, reads, path=None):
 
     plt.figure()
     plt.step(loc, np.vstack((three_prime, five_prime)).T, linewidth=0.25)
+
+    if fit is not None:
+        plt.step(loc, np.log(fit), linewidth=0.25, color='k')
 
     gene_line = -1.5
     gene_offset = 0.1

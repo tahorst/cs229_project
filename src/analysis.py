@@ -33,7 +33,7 @@ def plot_read_distributions(genes, starts, ends, reads, desc):
     # Save a distribution for each gene in the genome
     for gene, start, end in zip(genes, starts, ends):
         out = os.path.join(out_dir, '{}.png'.format(gene))
-        plot_distribution(gene, start, end, ma, out)
+        plot_distribution(gene, start, end, ma, path=out)
 
 
 if __name__ == '__main__':
