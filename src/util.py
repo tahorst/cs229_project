@@ -133,7 +133,7 @@ def load_genome(path=None):
 
     return genes[sort_idx], locus_tags[sort_idx], starts[sort_idx], ends[sort_idx]
 
-def load_region_reads(reads, region, fwd_strand, ma_window=1):
+def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
     '''
     Selects the read data for a region of interest.
 
@@ -144,6 +144,8 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1):
         fwd_strand (bool): True if region is on fwd strand, False if rev
         ma_window (int): Moving avergae taken if > 1, should be an odd number
             for best handling
+        expanded (bool): If True, the features are expanded to include reads in
+            the ma_window
 
     Returns:
         array of float: 2D array (region length, features): reads for the region
@@ -175,19 +177,26 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1):
 
         return ma
 
-    clipped_index = (ma_window-1) // 2  # For proper indexing since data is lost
-    convolution = np.ones((ma_window,))/ma_window
+    clipped_index = (ma_window-1) // 2  # For proper indexing since data is lost with ma
+    convolution = np.ones((ma_window,)) / ma_window
 
     start, end = get_region_bounds(region, fwd_strand)
 
     if fwd_strand:
-        three_prime = ma('3f', reads, convolution, clipped_index)[start:end]
-        five_prime = ma('5f', reads, convolution, clipped_index)[start:end]
+        three_prime = ma('3f', reads, convolution, clipped_index)
+        five_prime = ma('5f', reads, convolution, clipped_index)
     else:
-        three_prime = ma('3r', reads, convolution, clipped_index)[start:end]
-        five_prime = ma('5r', reads, convolution, clipped_index)[start:end]
+        three_prime = ma('3r', reads, convolution, clipped_index)
+        five_prime = ma('5r', reads, convolution, clipped_index)
 
-    x = np.vstack((three_prime, five_prime)).T
+    # Assemble desired features
+    if expanded:
+        tp = (three_prime[start+i:end+i] for i in range(-clipped_index, clipped_index+1))
+        fp = (five_prime[start+i:end+i] for i in range(-clipped_index, clipped_index+1))
+        x = np.hstack((np.vstack(tp).T, np.vstack(fp).T))
+    else:
+        x = np.vstack((three_prime[start:end], five_prime[start:end])).T
+
     return x
 
 def get_region_bounds(region, fwd_strand):
@@ -207,7 +216,7 @@ def get_region_bounds(region, fwd_strand):
     '''
 
     # Hardcoded for first operon
-    return 50, 5500
+    return 50, 5200
 
 def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     '''
@@ -258,7 +267,7 @@ def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     plt.step(loc, np.vstack((three_prime, five_prime)).T, linewidth=0.25)
 
     if fit is not None:
-        plt.step(loc, np.log(fit), linewidth=0.25, color='k')
+        plt.step(loc, np.log(fit), color='k')
 
     gene_line = -1.5
     gene_offset = 0.1
