@@ -133,6 +133,82 @@ def load_genome(path=None):
 
     return genes[sort_idx], locus_tags[sort_idx], starts[sort_idx], ends[sort_idx]
 
+def load_region_reads(reads, region, fwd_strand, ma_window=1):
+    '''
+    Selects the read data for a region of interest.
+
+    Args:
+        reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+        region (int): index of region
+        fwd_strand (bool): True if region is on fwd strand, False if rev
+        ma_window (int): Moving avergae taken if > 1, should be an odd number
+            for best handling
+
+    Returns:
+        array of float: 2D array (region length, features): reads for the region
+            of interest at each location
+
+    TODO:
+    - Generalize for any region, not just hardcoded one
+    '''
+
+    def ma(strand, reads, convolution, clipped_index):
+        '''
+        Calculates the moving average of reads on a given strand.
+
+        Args:
+            strand (str): strand from WIG_STRANDS (eg '3f')
+            reads (array of float): 2D array (# strands x genome size) of read counts
+            convolution (array of float): convolution array to apply to reads
+            clipped_index (int): indexes that get clipped from taking the moving average
+
+        Returns:
+            array of float: moving average applied to the reads on the given strand
+        '''
+
+        idx = WIG_STRANDS.index(strand)
+        ma = reads[idx, :].copy()
+
+        if len(convolution) > 1:
+            ma[clipped_index:-clipped_index] = np.convolve(reads[idx, :], convolution, 'valid')
+
+        return ma
+
+    clipped_index = (ma_window-1) // 2  # For proper indexing since data is lost
+    convolution = np.ones((ma_window,))/ma_window
+
+    start, end = get_region_bounds(region, fwd_strand)
+
+    if fwd_strand:
+        three_prime = ma('3f', reads, convolution, clipped_index)[start:end]
+        five_prime = ma('5f', reads, convolution, clipped_index)[start:end]
+    else:
+        three_prime = ma('3r', reads, convolution, clipped_index)[start:end]
+        five_prime = ma('5r', reads, convolution, clipped_index)[start:end]
+
+    x = np.vstack((three_prime, five_prime)).T
+    return x
+
+def get_region_bounds(region, fwd_strand):
+    '''
+    Gets the start and end of a genome sequence.
+
+    Args:
+        region (int): index of region
+        fwd_strand (bool): True if region is on fwd strand, False if rev
+
+    Returns:
+        start (int): starting position of region
+        end (int): ending position of region
+
+    TODO:
+    - Generalize for any region, not just hardcoded one
+    '''
+
+    # Hardcoded for first operon
+    return 50, 5500
+
 def plot_reads(start, end, genes, starts, ends, reads, path=None):
     '''
     Plots the reads of the 3' and 5' data on the given strand.  Also shows any
@@ -161,25 +237,25 @@ def plot_reads(start, end, genes, starts, ends, reads, path=None):
         # Reverse strand needs indices adjusted
         mask = (-ends > -start) & (-starts < -end)
         loc = np.arange(end, start)
-        threeprime = np.log(reads[strand, int(-start-1):int(-end-1)][::-1])
-        fiveprime = np.log(reads[2+strand, int(-start-1):int(-end-1)][::-1])
+        three_prime = np.log(reads[strand, int(-start-1):int(-end-1)][::-1])
+        five_prime = np.log(reads[2+strand, int(-start-1):int(-end-1)][::-1])
     else:
         # Forward strand
         mask = (ends > start) & (starts < end)
         loc = np.arange(start, end)
-        threeprime = np.log(reads[strand, int(start-1):int(end-1)])
-        fiveprime = np.log(reads[2+strand, int(start-1):int(end-1)])
+        three_prime = np.log(reads[strand, int(start-1):int(end-1)])
+        five_prime = np.log(reads[2+strand, int(start-1):int(end-1)])
 
     genes = genes[mask]
     starts = starts[mask]
     ends = ends[mask]
 
     # Adjust for 0 reads from log
-    threeprime[threeprime < 0] = -1
-    fiveprime[fiveprime < 0] = -1
+    three_prime[three_prime < 0] = -1
+    five_prime[five_prime < 0] = -1
 
     plt.figure()
-    plt.step(loc, np.vstack((threeprime, fiveprime)).T, linewidth=0.25)
+    plt.step(loc, np.vstack((three_prime, five_prime)).T, linewidth=0.25)
 
     gene_line = -1.5
     gene_offset = 0.1
@@ -231,20 +307,20 @@ def plot_distribution(label, start, end, reads, path=None):
 
     # Get read data
     if start < 0:
-        threeprime = reads[1, int(-start-1):int(-end-1)]
-        fiveprime = reads[3, int(-start-1):int(-end-1)]
+        three_prime = reads[1, int(-start-1):int(-end-1)]
+        five_prime = reads[3, int(-start-1):int(-end-1)]
     else:
-        threeprime = reads[0, int(start-1):int(end-1)]
-        fiveprime = reads[2, int(start-1):int(end-1)]
+        three_prime = reads[0, int(start-1):int(end-1)]
+        five_prime = reads[2, int(start-1):int(end-1)]
 
-    bins = range(int(np.max((fiveprime, threeprime))) + 1)
+    bins = range(int(np.max((five_prime, three_prime))) + 1)
     plt.figure()
     ax = plt.subplot(2,1,1)
     plt.title(label)
-    ax.hist(threeprime, bins=bins)
+    ax.hist(three_prime, bins=bins)
     ax.set_ylabel("3' Counts")
     ax = plt.subplot(2,1,2)
-    ax.hist(fiveprime, bins=bins)
+    ax.hist(five_prime, bins=bins)
     ax.set_ylabel("5' Counts")
 
     plt.xlabel('Reads')
