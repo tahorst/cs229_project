@@ -218,6 +218,41 @@ def get_region_bounds(region, fwd_strand):
     # Hardcoded for first operon
     return 50, 5200
 
+def get_region_info(region, fwd_strand, genes, starts, ends):
+    '''
+    Gets information about a region.
+
+    Args:
+        region (int): index of region
+        fwd_strand (bool): True if region is on fwd strand, False if rev
+        genes (array of str): names of genes
+        starts (array of int): start position for each gene
+        ends (array of int): end position for each gene
+
+    Returns:
+        start (int): starting position of region
+        end (int): ending position of region
+        region_genes (array of str): names of genes in region
+        region_starts (array of int): start position for each gene in region
+        region_ends (array of int): end position for each gene in region
+
+    TODO:
+    - Generalize for any region, not just hardcoded one - see get_region_info()
+    '''
+
+    start, end = get_region_bounds(region, fwd_strand)
+
+    if fwd_strand:
+        mask = (ends > start) & (starts < end)
+    else:
+        mask = (-ends > -start) & (-starts < -end)
+
+    region_genes = genes[mask]
+    region_starts = starts[mask]
+    region_ends = ends[mask]
+
+    return start, end, region_genes, region_starts, region_ends
+
 def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     '''
     Plots the reads of the 3' and 5' data on the given strand.  Also shows any
