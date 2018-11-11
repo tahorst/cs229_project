@@ -14,9 +14,11 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
+from util import load_wigs, load_region_reads
+
 
 PLOT_COLORS = ['red', 'green', 'blue', 'orange']  # Colors for your plots
-K = 4           # Number of Gaussians in the mixture model
+K = 6           # Number of Gaussians in the mixture model
 NUM_TRIALS = 10  # Number of trials to run (can be adjusted for debugging)
 UNLABELED = -1  # Cluster label for unlabeled data points (do not change)
 
@@ -27,14 +29,16 @@ def main(is_semi_supervised, trial_num):
           .format('semi-supervised' if is_semi_supervised else 'unsupervised'))
 
     # Load dataset
-    train_path = os.path.join('data', 'f1_reads.json')
-    total_reads = load_rend_seq(train_path)
+    # train_path = os.path.join('data', 'f1_reads.json')
+    # total_reads = load_rend_seq(train_path)
 
-    window = 11
-    clipped_index = int((window-1) / 2)  # For proper indexing since data is lost
-    ma = np.convolve(total_reads, np.ones((window,))/window, 'valid')
+    # window = 11
+    # clipped_index = int((window-1) / 2)  # For proper indexing since data is lost
+    # ma = np.convolve(total_reads, np.ones((window,))/window, 'valid')
 
-    x = np.vstack((ma, total_reads[clipped_index:- clipped_index], range(len(ma)))).T
+    # x = np.vstack((ma, total_reads[clipped_index:- clipped_index], range(len(ma)))).T
+
+    x = load_region_reads(load_wigs(), 1, True, ma_window=11)
 
     # *** START CODE HERE ***
     # (1) Initialize mu and sigma by splitting the m data points uniformly at random
@@ -145,6 +149,7 @@ def run_em(x, w, phi, mu, sigma):
                 likelihood[j] = gaussian(sample, mu[j, :], sigma[j, :, :]) * phi[j]
             ll += np.log(np.sum(likelihood))
 
+        print('{}: {}'.format(it, ll))
         it += 1
 
     print('{}: {}'.format(it, ll))
