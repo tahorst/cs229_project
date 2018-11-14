@@ -3,6 +3,7 @@ Useful functions and constants for analysis.
 '''
 
 import csv
+import json
 import os
 import re
 
@@ -13,6 +14,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'output')
 DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 RAW_DIR = os.path.join(DATA_DIR, 'raw')
+REGIONS_DIR = os.path.join(DATA_DIR, 'regions')
 
 # .wig files from Lalanne et al
 WIG_FILE = os.path.join(RAW_DIR, 'GSM2971252_Escherichia_coli_WT_Rend_seq_5_exo_MOPS_comp_25s_frag_pooled_{}_no_shadow.wig')
@@ -210,18 +212,16 @@ def get_region_bounds(region, fwd_strand):
     Returns:
         start (int): starting position of region
         end (int): ending position of region
-
-    TODO:
-    - Generalize for any region, not just hardcoded one
     '''
 
-    # Hardcoded for example operons
-    regions = {
-        1: (50, 5200),
-        2: (189500, 214000),
-        }
+    file = os.path.join(REGIONS_DIR, '{}{}.json'.format('f' if fwd_strand else 'r', region))
+    if not os.path.exists(file):
+        print('Region information does not exist for region {}. Try running identify_regions.py'.format(region))
 
-    return regions.get(region, regions[1])
+    with open(file) as f:
+        start, end = json.load(f)
+
+    return int(start), int(end)
 
 def get_region_info(region, fwd_strand, genes, starts, ends):
     '''
