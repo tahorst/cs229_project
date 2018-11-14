@@ -215,8 +215,13 @@ def get_region_bounds(region, fwd_strand):
     - Generalize for any region, not just hardcoded one
     '''
 
-    # Hardcoded for first operon
-    return 50, 5200
+    # Hardcoded for example operons
+    regions = {
+        1: (50, 5200),
+        2: (189500, 214000),
+        }
+
+    return regions.get(region, regions[1])
 
 def get_region_info(region, fwd_strand, genes, starts, ends):
     '''
