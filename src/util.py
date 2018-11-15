@@ -152,9 +152,6 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
     Returns:
         array of float: 2D array (region length, features): reads for the region
             of interest at each location
-
-    TODO:
-    - Generalize for any region, not just hardcoded one
     '''
 
     def ma(strand, reads, convolution, clipped_index):
@@ -172,12 +169,7 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
         '''
 
         idx = WIG_STRANDS.index(strand)
-        ma = reads[idx, :].copy()
-
-        if len(convolution) > 1:
-            ma[clipped_index:-clipped_index] = np.convolve(reads[idx, :], convolution, 'valid')
-
-        return ma
+        return np.convolve(reads[idx, :], convolution, 'full')
 
     clipped_index = (ma_window-1) // 2  # For proper indexing since data is lost with ma
     convolution = np.ones((ma_window,)) / ma_window
@@ -193,8 +185,8 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
 
     # Assemble desired features
     if expanded:
-        tp = (three_prime[start+i:end+i] for i in range(-clipped_index, clipped_index+1))
-        fp = (five_prime[start+i:end+i] for i in range(-clipped_index, clipped_index+1))
+        tp = (three_prime[start+i+clipped_index:end+i+clipped_index] for i in range(-clipped_index, clipped_index+1))
+        fp = (five_prime[start+i+clipped_index:end+i+clipped_index] for i in range(-clipped_index, clipped_index+1))
         x = np.hstack((np.vstack(tp).T, np.vstack(fp).T))
     else:
         x = np.vstack((three_prime[start:end], five_prime[start:end])).T
@@ -217,11 +209,29 @@ def get_region_bounds(region, fwd_strand):
     file = os.path.join(REGIONS_DIR, '{}{}.json'.format('f' if fwd_strand else 'r', region))
     if not os.path.exists(file):
         print('Region information does not exist for region {}. Try running identify_regions.py'.format(region))
+        return -1, -1
 
     with open(file) as f:
         start, end = json.load(f)
 
     return int(start), int(end)
+
+def get_n_regions(fwd_strand):
+    '''
+    Gives the number of regions for a given strand for easy looping.
+
+    Args:
+        fwd_strand (bool): True if forward strand, False if reverse
+
+    Returns:
+        int: number of regions for strand
+
+    TODO:
+        handle rev strand
+        better representation of data to not have this function?
+    '''
+
+    return 993
 
 def get_region_info(region, fwd_strand, genes, starts, ends):
     '''
@@ -240,9 +250,6 @@ def get_region_info(region, fwd_strand, genes, starts, ends):
         region_genes (array of str): names of genes in region
         region_starts (array of int): start position for each gene in region
         region_ends (array of int): end position for each gene in region
-
-    TODO:
-    - Generalize for any region, not just hardcoded one - see get_region_info()
     '''
 
     start, end = get_region_bounds(region, fwd_strand)
