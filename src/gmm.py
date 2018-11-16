@@ -13,26 +13,28 @@ import os
 import numpy as np
 from sklearn.mixture import GaussianMixture
 
+from sklearn_gm import ModifiedGaussianMixture
 from util import load_genome, load_wigs, load_region_reads, get_region_info, get_n_regions, plot_reads, OUTPUT_DIR
 
 
 if __name__ == '__main__':
     reads = load_wigs()
     genes, _, starts, ends = load_genome()
-    window = 21
+    window = 11
+    method = ModifiedGaussianMixture
 
     fwd_strand = True
     for region in range(get_n_regions(fwd_strand)):
-        print(region)
+        print('\nRegion: {}'.format(region))
 
         # Information for region to be analyzed
-        x = load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=True)
+        x = load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=False)
         start, end, region_genes, region_starts, region_ends = get_region_info(
             region, fwd_strand, genes, starts, ends)
-        n_levels = len(region_genes) + 2  # Extra level for 0 reads and spiked reads
+        n_levels = len(region_genes) + 3  # Extra level for 0 reads and spiked reads on each strand
 
         # Fit model
-        gmm = GaussianMixture(n_components=n_levels)
+        gmm = method(n_components=n_levels)
         gmm.fit(x)
         labels = gmm.predict(x)
         log_prob = np.log(gmm.predict_proba(x))
