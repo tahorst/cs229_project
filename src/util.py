@@ -293,14 +293,16 @@ def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
         # Reverse strand needs indices adjusted
         mask = (-ends > -start) & (-starts < -end)
         loc = np.arange(end, start)
-        three_prime = np.log(reads[strand, int(-start-1):int(-end-1)][::-1])
-        five_prime = np.log(reads[2+strand, int(-start-1):int(-end-1)][::-1])
+        with np.errstate(divide='ignore'):
+            three_prime = np.log(reads[strand, int(-start-1):int(-end-1)][::-1])
+            five_prime = np.log(reads[2+strand, int(-start-1):int(-end-1)][::-1])
     else:
         # Forward strand
         mask = (ends > start) & (starts < end)
         loc = np.arange(start, end)
-        three_prime = np.log(reads[strand, int(start-1):int(end-1)])
-        five_prime = np.log(reads[2+strand, int(start-1):int(end-1)])
+        with np.errstate(divide='ignore'):
+            three_prime = np.log(reads[strand, int(start-1):int(end-1)])
+            five_prime = np.log(reads[2+strand, int(start-1):int(end-1)])
 
     genes = genes[mask]
     starts = starts[mask]
@@ -314,7 +316,8 @@ def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     plt.step(loc, np.vstack((three_prime, five_prime)).T, linewidth=0.25)
 
     if fit is not None:
-        plt.step(loc, np.log(fit), color='k')
+        with np.errstate(divide='ignore'):
+            plt.step(loc, np.log(fit), color='k')
 
     gene_line = -1.5
     gene_offset = 0.1

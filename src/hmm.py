@@ -32,7 +32,6 @@ import numpy as np
 from util import load_genome, load_wigs, load_region_reads, get_region_info, get_n_regions, plot_reads, OUTPUT_DIR
 
 
-np.warnings.filterwarnings('ignore')
 VERBOSE = True
 
 

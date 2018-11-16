@@ -37,7 +37,8 @@ if __name__ == '__main__':
         gmm = method(n_components=n_levels)
         gmm.fit(x)
         labels = gmm.predict(x)
-        log_prob = np.log(gmm.predict_proba(x))
+        with np.errstate(divide='ignore'):
+            log_prob = np.log(gmm.predict_proba(x))
         means = gmm.means_.mean(axis=1)
 
         # Output levels
