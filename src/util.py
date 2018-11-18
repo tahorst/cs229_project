@@ -340,6 +340,9 @@ def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
         plt.text((s+e)/2, gene_line-3*gene_offset, gene, ha='center', fontsize=6)
     plt.xlim([loc[0], loc[-1]])
 
+    plt.xlabel('Genome Location')
+    plt.ylabel('Reads (log)')
+
     if path is None:
         plt.show()
     else:
