@@ -20,7 +20,7 @@ from util import load_genome, load_wigs, load_region_reads, get_region_info, get
 if __name__ == '__main__':
     reads = load_wigs()
     genes, _, starts, ends = load_genome()
-    window = 21
+    window = 15
     expanded = False
     total = True
     method = ModifiedGaussianMixture
