@@ -8,8 +8,6 @@ Output:
     Saves estimates for transcription unit assignments in output/hmm_assignments/
 '''
 
-from __future__ import division
-
 import os
 
 from sklearn.cluster import DBSCAN
@@ -43,7 +41,7 @@ if __name__ == '__main__':
     ## Path setup
     out_dir = os.path.join(OUTPUT_DIR, 'dbscan_assignments')
     if not os.path.exists(out_dir):
-        os.mkdir(out_dir)
+        os.makedirs(out_dir)
 
     ## Raw level assignments
     out = os.path.join(out_dir, '{}_cluster_{}_{}.png'.format(region, eps, min_samples))

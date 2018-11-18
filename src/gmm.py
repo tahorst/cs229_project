@@ -54,7 +54,7 @@ if __name__ == '__main__':
         ## Path setup
         out_dir = os.path.join(OUTPUT_DIR, 'gmm_assignments')
         if not os.path.exists(out_dir):
-            os.mkdir(out_dir)
+            os.makedirs(out_dir)
 
         ## Raw level assignments
         out = os.path.join(out_dir, '{}_raw.png'.format(region))

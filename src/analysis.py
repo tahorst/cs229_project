@@ -28,7 +28,7 @@ def plot_read_distributions(genes, starts, ends, reads, desc):
     # Check for output directory
     out_dir = os.path.join(OUTPUT_DIR, desc)
     if not os.path.exists(out_dir):
-        os.mkdir(out_dir)
+        os.makedirs(out_dir)
 
     # Save a distribution for each gene in the genome
     for gene, start, end in zip(genes, starts, ends):

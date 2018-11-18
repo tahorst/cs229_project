@@ -132,7 +132,7 @@ def save_region(genes, starts, ends, start, end, prefix):
     # Save numpy array for reads in region
     ## Check for output directory
     if not os.path.exists(REGIONS_DIR):
-        os.mkdir(REGIONS_DIR)
+        os.makedirs(REGIONS_DIR)
 
     ## Save region info
     out = os.path.join(REGIONS_DIR, '{}.json'.format(prefix))
@@ -144,7 +144,7 @@ def save_region(genes, starts, ends, start, end, prefix):
     ## Check for output directory
     out_dir = os.path.join(OUTPUT_DIR, 'regions')
     if not os.path.exists(out_dir):
-        os.mkdir(out_dir)
+        os.makedirs(out_dir)
 
     ## Save image
     out = os.path.join(out_dir, '{}.png'.format(prefix))

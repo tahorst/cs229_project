@@ -22,8 +22,6 @@ TODO:
     Select best assignment based on score between different seeds
 '''
 
-from __future__ import division
-
 import os
 
 from hmmlearn.hmm import GaussianHMM
@@ -93,7 +91,7 @@ if __name__ == '__main__':
                 ## Path setup
                 out_dir = os.path.join(OUTPUT_DIR, 'hmm_assignments')
                 if not os.path.exists(out_dir):
-                    os.mkdir(out_dir)
+                    os.makedirs(out_dir)
 
                 ## Raw level assignments
                 out = os.path.join(out_dir, '{}_iter_{}.png'.format(region, it))
