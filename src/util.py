@@ -375,15 +375,21 @@ def plot_distribution(label, start, end, reads, path=None):
         three_prime = reads[0, int(start-1):int(end-1)]
         five_prime = reads[2, int(start-1):int(end-1)]
 
+    ave_reads = (three_prime + five_prime) / 2
+
+    n_subplots = 3
     bins = range(int(np.max((five_prime, three_prime))) + 1)
     plt.figure()
-    ax = plt.subplot(2,1,1)
+    ax = plt.subplot(n_subplots,1,1)
     plt.title(label)
     ax.hist(three_prime, bins=bins)
     ax.set_ylabel("3' Counts")
-    ax = plt.subplot(2,1,2)
+    ax = plt.subplot(n_subplots,1,2)
     ax.hist(five_prime, bins=bins)
     ax.set_ylabel("5' Counts")
+    ax = plt.subplot(n_subplots,1,3)
+    ax.hist(ave_reads, bins=bins)
+    ax.set_ylabel("Average Counts")
 
     plt.xlabel('Reads')
 
