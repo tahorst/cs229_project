@@ -20,7 +20,9 @@ from util import load_genome, load_wigs, load_region_reads, get_region_info, get
 if __name__ == '__main__':
     reads = load_wigs()
     genes, _, starts, ends = load_genome()
-    window = 11
+    window = 21
+    expanded = False
+    total = True
     method = ModifiedGaussianMixture
 
     fwd_strand = True
@@ -28,7 +30,7 @@ if __name__ == '__main__':
         print('\nRegion: {}'.format(region))
 
         # Information for region to be analyzed
-        x = load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=False)
+        x = load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=expanded, total=total)
         start, end, region_genes, region_starts, region_ends = get_region_info(
             region, fwd_strand, genes, starts, ends)
         n_levels = len(region_genes) + 3  # Extra level for 0 reads and spiked reads on each strand

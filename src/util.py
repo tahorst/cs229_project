@@ -135,7 +135,7 @@ def load_genome(path=None):
 
     return genes[sort_idx], locus_tags[sort_idx], starts[sort_idx], ends[sort_idx]
 
-def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
+def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False, total=False):
     '''
     Selects the read data for a region of interest.
 
@@ -148,6 +148,9 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
             for best handling
         expanded (bool): If True, the features are expanded to include reads in
             the ma_window
+        total (bool): If True, only the total reads are returned with a second
+            feature representing the difference between 5' and 3' reads, does
+            not work with expanded set to True
 
     Returns:
         array of float: 2D array (region length, features): reads for the region
@@ -171,6 +174,9 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
         idx = WIG_STRANDS.index(strand)
         return np.convolve(reads[idx, :], convolution, 'full')
 
+    if expanded and total:
+        print('Warning: both expanded and total not supported together for load_region_reads')
+
     clipped_index = (ma_window-1) // 2  # For proper indexing since data is lost with ma
     convolution = np.ones((ma_window,)) / ma_window
 
@@ -188,6 +194,12 @@ def load_region_reads(reads, region, fwd_strand, ma_window=1, expanded=False):
         tp = (three_prime[start+i+clipped_index:end+i+clipped_index] for i in range(-clipped_index, clipped_index+1))
         fp = (five_prime[start+i+clipped_index:end+i+clipped_index] for i in range(-clipped_index, clipped_index+1))
         x = np.hstack((np.vstack(tp).T, np.vstack(fp).T))
+    elif total:
+        tp = three_prime[start:end] + 1
+        fp = five_prime[start:end] + 1
+        summed_reads = tp + fp - 2
+        diff = np.fmax(tp / fp, fp / tp)
+        x = np.vstack((summed_reads, diff)).T
     else:
         x = np.vstack((three_prime[start:end], five_prime[start:end])).T
 

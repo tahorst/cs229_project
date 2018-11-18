@@ -38,8 +38,9 @@ if __name__ == '__main__':
     genes, _, starts, ends = load_genome()
 
     # Parameters
-    window = 3
+    window = 1
     expanded = False
+    total = True
     n_seeds = 10
     n_iter = 20
 
@@ -48,7 +49,7 @@ if __name__ == '__main__':
         print('\nRegion: {}'.format(region))
 
         # Information for region to be analyzed
-        x = load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=expanded)
+        x = load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=expanded, total=total)
         start, end, region_genes, region_starts, region_ends = get_region_info(
             region, fwd_strand, genes, starts, ends)
         n_levels = 2*len(region_genes) + 2  # Extra level for 0 reads and spiked reads
