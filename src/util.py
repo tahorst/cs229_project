@@ -21,6 +21,12 @@ WIG_FILE = os.path.join(RAW_DIR, 'GSM2971252_Escherichia_coli_WT_Rend_seq_5_exo_
 PROCESSED_FILE = os.path.join(DATA_DIR, 'GSM2971252_reads.npy')
 WIG_STRANDS = ['3f', '3r', '5f', '5r']
 
+# Spike annotations
+ANNOTATED_SPIKES_FILE = os.path.join(DATA_DIR, 'annotated_spikes.json')
+ALL = 0  # Label for all spikes
+SMALL = 1  # Label for spikes in regions with small operons
+LARGE = 2  # Label for spikes in regions with large operons
+
 # Genome information
 GENOME_SIZE = 4639675
 ANNOTATION_FILE = os.path.join(RAW_DIR, 'U00096.2.faa')
@@ -276,6 +282,34 @@ def get_region_info(region, fwd_strand, genes, starts, ends):
     region_ends = ends[mask]
 
     return start, end, region_genes, region_starts, region_ends
+
+def get_labeled_spikes(region, fwd_strand, tag=ALL):
+    '''
+    Gets locations of annotated spikes within a specific region.
+
+    Args:
+        region (int): index of region
+        fwd_strand (bool): True if region is on fwd strand, False if rev
+        tag (int): which set of annotations to return (ALL, SMALL, LARGE)
+
+    Returns:
+        array of int: relative positions within a region where spikes occur
+
+    TODO:
+        Load from file, not hardcoded
+    '''
+
+    start, end = get_region_bounds(region, fwd_strand)
+
+    # with open(ANNOTATED_SPIKES_FILE) as f:
+    #     data = json.load(f)
+
+    if region == 0:
+        spikes = np.array([146, 306, 5073])
+    else:
+        spikes = np.array([30, 50])
+
+    return spikes
 
 def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     '''
