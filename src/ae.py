@@ -100,10 +100,6 @@ if __name__ == '__main__':
     fwd_reads = np.vstack((np.convolve(reads[idx_3p, :], convolution, 'same'),
         np.convolve(reads[idx_5p, :], convolution, 'same')))
 
-    region = 0
-    fwd_strand = True
-    start, end = util.get_region_bounds(region, fwd_strand)
-
     # Metaparameters
     n_features = 2
     window = 7
@@ -128,22 +124,27 @@ if __name__ == '__main__':
 
     # Train neural net
     training_data = get_training_data(fwd_reads, genes[forward], starts[forward], ends[forward], window)
-    model.fit(training_data, training_data, epochs=5, validation_split=0.1)
+    model.fit(training_data, training_data, epochs=5)
 
-    # Test trained model
-    test_data = np.array(process_reads(fwd_reads, start, end, window))
-    prediction = model.predict(test_data)
-    mse = np.mean((test_data - prediction)**2, axis=1)
-    mse = np.hstack((np.zeros(pad), mse, np.zeros(pad)))
+    # Test model on each region
+    fwd_strand = True
+    for region in range(util.get_n_regions(fwd_strand)):
+        print('\nRegion: {}'.format(region))
 
-    # Plot outputs
-    ## Create directory
-    out_dir = os.path.join(util.OUTPUT_DIR, 'ae_assignments')
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+        start, end = util.get_region_bounds(region, fwd_strand)
 
-    ## Raw level assignments
-    out = os.path.join(out_dir, '{}.png'.format(region))
-    util.plot_reads(start, end, genes, starts, ends, reads, fit=mse, path=out)
+        # Test trained model
+        test_data = np.array(process_reads(fwd_reads, start, end, window))
+        prediction = model.predict(test_data)
+        mse = np.mean((test_data - prediction)**2, axis=1)
+        mse = np.hstack((np.zeros(pad), mse, np.zeros(pad)))
 
-    import ipdb; ipdb.set_trace()
+        # Plot outputs
+        ## Create directory
+        out_dir = os.path.join(util.OUTPUT_DIR, 'ae_assignments')
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+
+        ## Plot MSE values with reads
+        out = os.path.join(out_dir, '{}.png'.format(region))
+        util.plot_reads(start, end, genes, starts, ends, reads, fit=mse, path=out)
