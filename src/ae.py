@@ -149,6 +149,9 @@ if __name__ == '__main__':
     genes, _, starts, ends = util.load_genome()
     forward = starts > 0
 
+    test_accuracy = True
+    tol = 5
+
     ma_window = 21
     convolution = np.ones((ma_window,)) / ma_window
     idx_3p = util.WIG_STRANDS.index('3f')
@@ -187,7 +190,15 @@ if __name__ == '__main__':
 
     # Test model on each region
     fwd_strand = True
+    total_correct = 0
+    total_annotated = 0
     for region in range(util.get_n_regions(fwd_strand)):
+        initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
+
+        # Skip if only testing region with annotations
+        if test_accuracy and initiations_val is None or terminations_val is None:
+            continue
+
         print('\nRegion: {}'.format(region))
 
         start, end = util.get_region_bounds(region, fwd_strand)
@@ -209,5 +220,34 @@ if __name__ == '__main__':
         util.plot_reads(start, end, genes, starts, ends, reads, fit=mse/cutoff/np.e, path=out)
 
         initiations, terminations = get_spikes(mse, fwd_reads[:, start:end], cutoff)
+
+        # Determine accuracy of peak identification
+        # TODO: functionalize in util
+        # TODO: account for false positives
+        correct = 0
+        total = len(initiations_val) + len(terminations_val)
+        for val in initiations_val:
+            for test in initiations:
+                if np.abs(val-test) < tol:
+                    correct += 1
+                    break
+        for val in terminations_val:
+            for test in terminations:
+                if np.abs(val-test) < tol:
+                    correct += 1
+                    break
+
+        total_correct += correct
+        total_annotated += total
+        if total > 0:
+            accuracy = correct / total * 100
+        else:
+            accuracy = 0
+
         print('\tInitiations: {}'.format(start + initiations))
         print('\tTerminations: {}'.format(start + terminations))
+        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, total, accuracy))
+
+    print('Overall accuracy for method: {}/{} ({:.1f}%)'.format(
+        total_correct, total_annotated, total_correct / total_annotated * 100)
+        )
