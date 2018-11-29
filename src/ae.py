@@ -191,7 +191,9 @@ if __name__ == '__main__':
     # Test model on each region
     fwd_strand = True
     total_correct = 0
+    total_wrong = 0
     total_annotated = 0
+    total_identified = 0
     for region in range(util.get_n_regions(fwd_strand)):
         initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
 
@@ -227,8 +229,9 @@ if __name__ == '__main__':
         # Determine accuracy of peak identification
         # TODO: functionalize in util
         # TODO: account for false positives
+        n_val = len(initiations_val) + len(terminations_val)
+        n_test = len(initiations) + len(terminations)
         correct = 0
-        total = len(initiations_val) + len(terminations_val)
         for val in initiations_val:
             for test in initiations:
                 if np.abs(val-test) < tol:
@@ -239,18 +242,31 @@ if __name__ == '__main__':
                 if np.abs(val-test) < tol:
                     correct += 1
                     break
+        wrong = n_test - correct
 
+        total_annotated += n_val
+        total_identified += n_test
         total_correct += correct
-        total_annotated += total
-        if total > 0:
-            accuracy = correct / total * 100
+        total_wrong += wrong
+
+        if n_val > 0:
+            accuracy = correct / n_val * 100
         else:
             accuracy = 0
 
+        if n_test > 0:
+            false_positives = wrong / n_test * 100
+        else:
+            false_positives = 0
+
         print('\tInitiations: {}'.format(initiations))
         print('\tTerminations: {}'.format(terminations))
-        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, total, accuracy))
+        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
+        print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
 
     print('\nOverall accuracy for method: {}/{} ({:.1f}%)'.format(
         total_correct, total_annotated, total_correct / total_annotated * 100)
+        )
+    print('Overall false positives for method: {}/{} ({:.1f}%)'.format(
+        total_wrong, total_identified, total_wrong / total_identified * 100)
         )
