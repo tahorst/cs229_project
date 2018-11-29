@@ -10,6 +10,8 @@ Output:
 Parameters to search:
 
 TODO:
+- explore different models
+- create score function
 '''
 
 import os
@@ -80,6 +82,8 @@ def get_training_data(reads, genes, starts, ends, window):
         if gene in excluded:
             continue
 
+        start += 20
+        end -= 20
         data += process_reads(reads, start, end, window)
 
         if gene == stop_gene:
@@ -136,7 +140,8 @@ def get_spikes(mse, reads, cutoff, gap=3):
         else:
             terminations.append(position)
 
-    return np.array(initiations), np.array(terminations)
+    # Add 1 to locations for actual genome location because of 0 indexing
+    return np.array(initiations) + 1, np.array(terminations) + 1
 
 
 if __name__ == '__main__':
@@ -150,7 +155,8 @@ if __name__ == '__main__':
     idx_5p = util.WIG_STRANDS.index('5f')
     fwd_reads = np.vstack((reads[idx_3p, :], reads[idx_5p, :]))
     fwd_reads_ma = np.vstack((np.convolve(reads[idx_3p, :], convolution, 'same'),
-        np.convolve(reads[idx_5p, :], convolution, 'same')))
+        np.convolve(reads[idx_5p, :], convolution, 'same'))
+        )
 
     # Metaparameters
     n_features = 2
@@ -200,7 +206,7 @@ if __name__ == '__main__':
 
         ## Plot MSE values with reads
         out = os.path.join(out_dir, '{}.png'.format(region))
-        util.plot_reads(start, end, genes, starts, ends, reads, fit=mse, path=out)
+        util.plot_reads(start, end, genes, starts, ends, reads, fit=mse/cutoff/np.e, path=out)
 
         initiations, terminations = get_spikes(mse, fwd_reads[:, start:end], cutoff)
         print('\tInitiations: {}'.format(start + initiations))
