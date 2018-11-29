@@ -196,7 +196,7 @@ if __name__ == '__main__':
         initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
 
         # Skip if only testing region with annotations
-        if test_accuracy and initiations_val is None or terminations_val is None:
+        if test_accuracy and len(initiations_val) == 0 and len(terminations_val) == 0:
             continue
 
         print('\nRegion: {}'.format(region))
@@ -221,6 +221,9 @@ if __name__ == '__main__':
 
         initiations, terminations = get_spikes(mse, fwd_reads[:, start:end], cutoff)
 
+        initiations += start
+        terminations += start
+
         # Determine accuracy of peak identification
         # TODO: functionalize in util
         # TODO: account for false positives
@@ -244,10 +247,10 @@ if __name__ == '__main__':
         else:
             accuracy = 0
 
-        print('\tInitiations: {}'.format(start + initiations))
-        print('\tTerminations: {}'.format(start + terminations))
+        print('\tInitiations: {}'.format(initiations))
+        print('\tTerminations: {}'.format(terminations))
         print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, total, accuracy))
 
-    print('Overall accuracy for method: {}/{} ({:.1f}%)'.format(
+    print('\nOverall accuracy for method: {}/{} ({:.1f}%)'.format(
         total_correct, total_annotated, total_correct / total_annotated * 100)
         )

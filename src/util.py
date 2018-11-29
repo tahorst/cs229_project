@@ -22,7 +22,7 @@ PROCESSED_FILE = os.path.join(DATA_DIR, 'GSM2971252_reads.npy')
 WIG_STRANDS = ['3f', '3r', '5f', '5r']
 
 # Spike annotations
-ANNOTATED_SPIKES_FILE = os.path.join(DATA_DIR, 'annotated_spikes.json')
+ANNOTATED_SPIKES_FILE = os.path.join(DATA_DIR, 'validation', 'annotated_spikes.json')
 ALL = 0  # Label for all spikes
 SMALL = 1  # Label for spikes in regions with small operons
 LARGE = 2  # Label for spikes in regions with large operons
@@ -293,23 +293,22 @@ def get_labeled_spikes(region, fwd_strand, tag=ALL):
         tag (int): which set of annotations to return (ALL, SMALL, LARGE)
 
     Returns:
-        array of int: relative positions within a region where spikes occur
-
-    TODO:
-        Load from file, not hardcoded
+        initiations (arrays of int): positions within a region where initiation occurs
+        terminations (arrays of int): positions within a region where termination occurs
     '''
 
     start, end = get_region_bounds(region, fwd_strand)
 
-    # with open(ANNOTATED_SPIKES_FILE) as f:
-    #     data = json.load(f)
+    with open(ANNOTATED_SPIKES_FILE) as f:
+        data = json.load(f)
 
-    if region == 0:
-        spikes = np.array([146, 306, 5073])
-    else:
-        spikes = np.array([30, 50])
+    starts = np.array(data['starts'])
+    ends = np.array(data['ends'])
 
-    return spikes
+    initiations = starts[(starts >= start) & (starts <= end)]
+    terminations = ends[(ends >= start) & (ends <= end)]
+
+    return initiations, terminations
 
 def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     '''
