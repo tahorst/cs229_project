@@ -8,12 +8,10 @@ Output:
     Saves estimates for transcription unit assignments in output/ae_assignments/
 
 Parameters to search:
-
-TODO:
-- explore different models
 '''
 
 import csv
+from datetime import datetime as dt
 import os
 
 import keras
@@ -22,7 +20,8 @@ import numpy as np
 import util
 
 
-SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'ae_summary.csv')
+SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'ae_summary_{}.csv'.format(
+    dt.strftime(dt.now(), '%Y%m%d-%H%M%S')))
 
 
 def process_reads(reads, start, end, window):
@@ -146,11 +145,13 @@ def get_spikes(mse, reads, cutoff, gap=3):
     # Add 1 to locations for actual genome location because of 0 indexing
     return np.array(initiations) + 1, np.array(terminations) + 1
 
-def get_fwd_reads(ma_window=21):
+def get_fwd_reads(reads, ma_window):
     '''
     Get read data for just the forward strand.
 
     Args:
+        reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
         ma_window (int): window size for taking the moving average
 
     Returns:
@@ -298,12 +299,19 @@ def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, t
 
     return total_correct, total_wrong, total_annotated, total_identified
 
-def summarize(ma_window, window, cutoff, correct, wrong, annotated, identified):
+def summarize(ma_window, window, cutoff, nodes, correct, wrong, annotated, identified):
     '''
-    Print string to stdout and save in a file.
+    Print string to stdout and save results in a file.
 
     Args:
-        s (str): string to be displayed and saved
+        ma_window (int): size of window for moving average of reads
+        window (int): size of window for feature selection
+        cutoff (float): cutoff of MSE value for labelling a peak
+        nodes (array of int): number of nodes at each hidden layer
+        correct (int): number of correctly identified peaks
+        wrong (int): number of incorrectly identified peaks
+        annotated (int): number of peaks that have been annotated
+        identified (int): number of peaks that were identified by the algorithm
     '''
 
     accuracy = '{:.1f}'.format(correct / annotated * 100)
@@ -324,7 +332,7 @@ def summarize(ma_window, window, cutoff, correct, wrong, annotated, identified):
     # Save in summary file
     with open(SUMMARY_FILE, 'a') as f:
         writer = csv.writer(f, delimiter='\t')
-        writer.writerow([ma_window, window, cutoff, accuracy, false_positive_percent,
+        writer.writerow([ma_window, window, cutoff, nodes, accuracy, false_positive_percent,
             correct, annotated, wrong, identified])
 
 
@@ -336,11 +344,24 @@ if __name__ == '__main__':
     test_accuracy = True
     tol = 5
 
+    models = np.array([
+        [12, 6, 3, 2, 3, 6, 12],
+        [12, 6, 3, 6, 12],
+        [16, 8, 4, 2, 4, 8, 16],
+        [16, 8, 4, 3, 4, 8, 16],
+        [16, 12, 8, 4, 2, 4, 8, 12, 16],
+        [8, 2, 8],
+        [8, 3, 8],
+        [8, 4, 8],
+        [8, 4, 3, 4, 8],
+        [8, 4, 2, 4, 8],
+        ])
+
     # Clear summary file
     with open(SUMMARY_FILE, 'w') as f:
         writer = csv.writer(f, delimiter='\t')
-        writer.writerow(['MA window', 'Window', 'Cutoff', 'Accuracy (%)', 'False Positives (%)',
-            'Correct', 'Annotated', 'Wrong', 'Identified'])
+        writer.writerow(['MA window', 'Window', 'Cutoff', 'Hidden nodes',
+            'Accuracy (%)', 'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified'])
 
     # Process data
     for ma_window in [1, 5, 11, 15, 21, 25, 31]:
@@ -349,20 +370,21 @@ if __name__ == '__main__':
         for window in [1, 3, 5, 7, 11, 15, 21]:
             # Metaparameters
             input_dim = n_features * window
-            hidden_nodes = np.array([8, 4, 2, 4, 8])
             activation = 'sigmoid'
 
-            # Build neural net
-            model = build_model(input_dim, hidden_nodes, activation)
-
-            # Train neural net
             training_data = get_training_data(fwd_reads_ma, genes[forward], starts[forward], ends[forward], window)
-            model.fit(training_data, training_data, epochs=3)
 
-            for cutoff in [0.05, 0.08, 0.1, 0.12, 0.15]:
-                # Test model on each region
-                correct, wrong, annotated, identified = test_model(
-                    model, fwd_reads_ma, fwd_reads, window, reads, genes, starts, ends, tol, cutoff)
+            for hidden_nodes in models:
+                # Build neural net
+                model = build_model(input_dim, hidden_nodes, activation)
 
-                # Overall statistics
-                summarize(ma_window, window, cutoff, correct, wrong, annotated, identified)
+                # Train neural net
+                model.fit(training_data, training_data, epochs=3)
+
+                for cutoff in [0.05, 0.08, 0.1, 0.12, 0.15]:
+                    # Test model on each region
+                    correct, wrong, annotated, identified = test_model(
+                        model, fwd_reads_ma, fwd_reads, window, reads, genes, starts, ends, tol, cutoff)
+
+                    # Overall statistics
+                    summarize(ma_window, window, cutoff, hidden_nodes, correct, wrong, annotated, identified)
