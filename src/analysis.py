@@ -8,9 +8,50 @@ Usage (run from project directory):
 import os
 
 import numpy as np
+import plotly.offline as py
+import plotly.graph_objs as go
 
-from util import load_wigs, load_genome, get_region_info, plot_distribution, plot_reads, OUTPUT_DIR
+import util
 
+
+def plot_interactive_reads(reads, start=0, end=100000):
+    '''
+    Plot reads genes for the whole genome in an interactive plot saved in
+    the output directory as interactive_reads.html.
+
+    Args:
+        reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+        start (int): starting index of reads to plot
+        end (int): ending index of reads to plot
+    '''
+
+    x = list(range(start, end))
+    with np.errstate(divide='ignore'):
+        three_prime = go.Scatter(
+            x=x,
+            y=np.log(reads[util.WIG_STRANDS.index('3f'), start:end]),
+            name="3'",
+            )
+        five_prime = go.Scatter(
+            x=x,
+            y=np.log(reads[util.WIG_STRANDS.index('5f'), start:end]),
+            name="5'",
+            )
+
+    data = [three_prime, five_prime]
+    layout = dict(
+        xaxis=dict(
+            rangeslider=dict(
+                visible=True,
+                ),
+            ),
+        )
+
+    fig = dict(data=data, layout=layout)
+
+    out = os.path.join(util.OUTPUT_DIR, 'interactive_reads.html')
+    py.plot(fig, filename=out, auto_open=False)
 
 def plot_region(region, genes, starts, ends, reads):
     '''
@@ -26,13 +67,13 @@ def plot_region(region, genes, starts, ends, reads):
     '''
 
     # Check for output directory
-    out_dir = os.path.join(OUTPUT_DIR, 'segmentation')
+    out_dir = os.path.join(util.OUTPUT_DIR, 'segmentation')
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     # Get start and end positions to plot
     if region >= 0:
-        start, end, _, _, _ = get_region_info(region, True, genes, starts, ends)
+        start, end, _, _, _ = util.get_region_info(region, True, genes, starts, ends)
     else:
         region = 'both'
         start = 1
@@ -40,7 +81,7 @@ def plot_region(region, genes, starts, ends, reads):
 
     # Save read information
     out = os.path.join(out_dir, '{}.png'.format(region))
-    plot_reads(start, end, genes, starts, ends, reads, path=out)
+    util.plot_reads(start, end, genes, starts, ends, reads, path=out)
 
 def plot_read_distributions(genes, starts, ends, reads, desc):
     '''
@@ -56,20 +97,23 @@ def plot_read_distributions(genes, starts, ends, reads, desc):
     '''
 
     # Check for output directory
-    out_dir = os.path.join(OUTPUT_DIR, desc)
+    out_dir = os.path.join(util.OUTPUT_DIR, desc)
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     # Save a distribution for each gene in the genome
     for gene, start, end in zip(genes, starts, ends):
         out = os.path.join(out_dir, '{}.png'.format(gene))
-        plot_distribution(gene, start, end, reads, path=out)
+        util.plot_distribution(gene, start, end, reads, path=out)
 
 
 if __name__ == '__main__':
     # Load sequencing and genome data
-    reads = load_wigs()
-    genes, _, starts, ends = load_genome()
+    reads = util.load_wigs()
+    genes, _, starts, ends = util.load_genome()
+
+    # Generate interactive plotly plot for identifying labeled peaks
+    plot_interactive_reads(reads)
 
     # Illustrate region segmentation
     for region in range(-1, 2):
