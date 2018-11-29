@@ -11,15 +11,18 @@ Parameters to search:
 
 TODO:
 - explore different models
-- create score function
 '''
 
+import csv
 import os
 
 import keras
 import numpy as np
 
 import util
+
+
+SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'ae_summary.csv')
 
 
 def process_reads(reads, start, end, window):
@@ -195,7 +198,7 @@ def build_model(input_dim, hidden_nodes, activation):
 
     return model
 
-def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, tol):
+def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, tol, cutoff):
     '''
     Assesses the model performance against test data.  Outputs a plot of mean square error within
     each region overlayed on read data to output/ae_assignments.  Displays statistics for each
@@ -212,6 +215,7 @@ def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, t
         starts (array of int): start position for each gene
         ends (array of int): end position for each gene
         tol (int): distance assigned peak can be from labeled peak to call correct
+        cutoff (float): cutoff of MSE value for labelling a peak
     '''
 
     pad = (window - 1) // 2
@@ -292,13 +296,36 @@ def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, t
         print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
         print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
 
-    # Overall statistics
-    print('\nOverall accuracy for method: {}/{} ({:.1f}%)'.format(
-        total_correct, total_annotated, total_correct / total_annotated * 100)
-        )
-    print('Overall false positives for method: {}/{} ({:.1f}%)'.format(
-        total_wrong, total_identified, total_wrong / total_identified * 100)
-        )
+    return total_correct, total_wrong, total_annotated, total_identified
+
+def summarize(ma_window, window, cutoff, correct, wrong, annotated, identified):
+    '''
+    Print string to stdout and save in a file.
+
+    Args:
+        s (str): string to be displayed and saved
+    '''
+
+    accuracy = '{:.1f}'.format(correct / annotated * 100)
+    if identified > 0:
+        false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+    else:
+        false_positive_percent = 0
+
+    # Standard out
+    print('\nMA window: {}  window: {}  cutoff: {}'.format(ma_window, window, cutoff))
+    print('Overall accuracy for method: {}/{} ({}%)'.format(
+        correct, annotated, accuracy)
+    )
+    print('Overall false positives for method: {}/{} ({}%)'.format(
+        wrong, identified, false_positive_percent)
+    )
+
+    # Save in summary file
+    with open(SUMMARY_FILE, 'a') as f:
+        writer = csv.writer(f, delimiter='\t')
+        writer.writerow([ma_window, window, cutoff, accuracy, false_positive_percent,
+            correct, annotated, wrong, identified])
 
 
 if __name__ == '__main__':
@@ -309,23 +336,33 @@ if __name__ == '__main__':
     test_accuracy = True
     tol = 5
 
+    # Clear summary file
+    with open(SUMMARY_FILE, 'w') as f:
+        writer = csv.writer(f, delimiter='\t')
+        writer.writerow(['MA window', 'Window', 'Cutoff', 'Accuracy (%)', 'False Positives (%)',
+            'Correct', 'Annotated', 'Wrong', 'Identified'])
+
     # Process data
-    ma_window = 21
-    fwd_reads, fwd_reads_ma, n_features = get_fwd_reads(ma_window)
+    for ma_window in [1, 5, 11, 15, 21, 25, 31]:
+        fwd_reads, fwd_reads_ma, n_features = get_fwd_reads(ma_window)
 
-    # Metaparameters
-    window = 7
-    input_dim = n_features * window
-    hidden_nodes = np.array([8, 4, 2, 4, 8])
-    activation = 'sigmoid'
-    cutoff = 0.1
+        for window in [1, 3, 5, 7, 11, 15, 21]:
+            # Metaparameters
+            input_dim = n_features * window
+            hidden_nodes = np.array([8, 4, 2, 4, 8])
+            activation = 'sigmoid'
 
-    # Build neural net
-    model = build_model(input_dim, hidden_nodes, activation)
+            # Build neural net
+            model = build_model(input_dim, hidden_nodes, activation)
 
-    # Train neural net
-    training_data = get_training_data(fwd_reads_ma, genes[forward], starts[forward], ends[forward], window)
-    model.fit(training_data, training_data, epochs=3)
+            # Train neural net
+            training_data = get_training_data(fwd_reads_ma, genes[forward], starts[forward], ends[forward], window)
+            model.fit(training_data, training_data, epochs=3)
 
-    # Test model on each region
-    test_model(model, fwd_reads_ma, fwd_reads, window, reads, genes, starts, ends, tol)
+            for cutoff in [0.05, 0.08, 0.1, 0.12, 0.15]:
+                # Test model on each region
+                correct, wrong, annotated, identified = test_model(
+                    model, fwd_reads_ma, fwd_reads, window, reads, genes, starts, ends, tol, cutoff)
+
+                # Overall statistics
+                summarize(ma_window, window, cutoff, correct, wrong, annotated, identified)
