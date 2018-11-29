@@ -143,57 +143,85 @@ def get_spikes(mse, reads, cutoff, gap=3):
     # Add 1 to locations for actual genome location because of 0 indexing
     return np.array(initiations) + 1, np.array(terminations) + 1
 
+def get_fwd_reads(ma_window=21):
+    '''
+    Get read data for just the forward strand.
 
-if __name__ == '__main__':
-    reads = util.load_wigs()
-    genes, _, starts, ends = util.load_genome()
-    forward = starts > 0
+    Args:
+        ma_window (int): window size for taking the moving average
 
-    test_accuracy = True
-    tol = 5
+    Returns:
+        fwd_reads (array of float): 2D array of raw reads, dims (n_features x genome size)
+        fwd_reads_ma (array of float): 2D array of averaged reads, dims (n_features x genome size)
+        n_features (int): number of features assembled
+    '''
 
-    ma_window = 21
+    n_features = 2
+
     convolution = np.ones((ma_window,)) / ma_window
     idx_3p = util.WIG_STRANDS.index('3f')
     idx_5p = util.WIG_STRANDS.index('5f')
-    fwd_reads = np.vstack((reads[idx_3p, :], reads[idx_5p, :]))
-    fwd_reads_ma = np.vstack((np.convolve(reads[idx_3p, :], convolution, 'same'),
-        np.convolve(reads[idx_5p, :], convolution, 'same'))
+
+    three_prime = reads[idx_3p, :]
+    five_prime = reads[idx_5p, :]
+    fwd_reads = np.vstack((three_prime, five_prime))
+    fwd_reads_ma = np.vstack((np.convolve(three_prime, convolution, 'same'),
+        np.convolve(five_prime, convolution, 'same'))
         )
 
-    # Metaparameters
-    n_features = 2
-    window = 7
-    pad = (window - 1) // 2
-    input_nodes = n_features * window
-    hidden_nodes = 8
-    activation = 'sigmoid'
-    cutoff = 0.1
+    return fwd_reads, fwd_reads_ma, n_features
 
-    # Build neural net
+def build_model(input_dim, hidden_nodes, activation):
+    '''
+    Builds an autoencoder neural net model
+
+    Args:
+        input_dim (int): number of dimensions of the input data
+        hidden_nodes (array of int): number of nodes at each hidden layer
+        activation (str): activation type
+
+    Returns:
+        model (keras.Sequential object): compiled model object
+    '''
+
     model = keras.Sequential()
-    model.add(keras.layers.Dense(hidden_nodes, input_dim=input_nodes, activation=activation))
-    model.add(keras.layers.Dense(hidden_nodes // 2, activation=activation))
-    # model.add(keras.layers.Dense(hidden_nodes // 4, activation=activation))
-    model.add(keras.layers.Dense(2, activation=activation))
-    # model.add(keras.layers.Dense(hidden_nodes // 4, activation=activation))
-    model.add(keras.layers.Dense(hidden_nodes // 2, activation=activation))
-    model.add(keras.layers.Dense(hidden_nodes, activation=activation))
-    model.add(keras.layers.Dense(input_nodes, activation='sigmoid'))
+    model.add(keras.layers.Dense(hidden_nodes[0], input_dim=input_dim, activation=activation))
+    for nodes in hidden_nodes[1:]:
+        model.add(keras.layers.Dense(nodes, activation=activation))
+    model.add(keras.layers.Dense(input_dim, activation='sigmoid'))
     model.summary()
 
     model.compile(optimizer='adam', loss='mse')
 
-    # Train neural net
-    training_data = get_training_data(fwd_reads_ma, genes[forward], starts[forward], ends[forward], window)
-    model.fit(training_data, training_data, epochs=3)
+    return model
 
-    # Test model on each region
+def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, tol):
+    '''
+    Assesses the model performance against test data.  Outputs a plot of mean square error within
+    each region overlayed on read data to output/ae_assignments.  Displays statistics for each
+    region and overall performance.
+
+    Args:
+        model (keras.Sequential object): compiled model object
+        ma_reads (array of float): 2D array of averaged reads, dims (n_features x genome size)
+        reads (array of float): 2D array of raw reads, dims (n_features x genome size)
+        window (int): size of window used for training data generation
+        all_reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+        genes (array of str): names of genes
+        starts (array of int): start position for each gene
+        ends (array of int): end position for each gene
+        tol (int): distance assigned peak can be from labeled peak to call correct
+    '''
+
+    pad = (window - 1) // 2
     fwd_strand = True
+
     total_correct = 0
     total_wrong = 0
     total_annotated = 0
     total_identified = 0
+
     for region in range(util.get_n_regions(fwd_strand)):
         initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
 
@@ -206,7 +234,7 @@ if __name__ == '__main__':
         start, end = util.get_region_bounds(region, fwd_strand)
 
         # Test trained model
-        test_data = np.array(process_reads(fwd_reads_ma, start, end, window))
+        test_data = np.array(process_reads(ma_reads, start, end, window))
         prediction = model.predict(test_data)
         mse = np.mean((test_data - prediction)**2, axis=1)
         mse = np.hstack((np.zeros(pad), mse, np.zeros(pad)))
@@ -219,16 +247,15 @@ if __name__ == '__main__':
 
         ## Plot MSE values with reads
         out = os.path.join(out_dir, '{}.png'.format(region))
-        util.plot_reads(start, end, genes, starts, ends, reads, fit=mse/cutoff/np.e, path=out)
+        util.plot_reads(start, end, genes, starts, ends, all_reads, fit=mse/cutoff/np.e, path=out)
 
-        initiations, terminations = get_spikes(mse, fwd_reads[:, start:end], cutoff)
+        initiations, terminations = get_spikes(mse, reads[:, start:end], cutoff)
 
         initiations += start
         terminations += start
 
         # Determine accuracy of peak identification
         # TODO: functionalize in util
-        # TODO: account for false positives
         n_val = len(initiations_val) + len(terminations_val)
         n_test = len(initiations) + len(terminations)
         correct = 0
@@ -259,14 +286,46 @@ if __name__ == '__main__':
         else:
             false_positives = 0
 
+        # Region statistics
         print('\tInitiations: {}'.format(initiations))
         print('\tTerminations: {}'.format(terminations))
         print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
         print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
 
+    # Overall statistics
     print('\nOverall accuracy for method: {}/{} ({:.1f}%)'.format(
         total_correct, total_annotated, total_correct / total_annotated * 100)
         )
     print('Overall false positives for method: {}/{} ({:.1f}%)'.format(
         total_wrong, total_identified, total_wrong / total_identified * 100)
         )
+
+
+if __name__ == '__main__':
+    reads = util.load_wigs()
+    genes, _, starts, ends = util.load_genome()
+    forward = starts > 0
+
+    test_accuracy = True
+    tol = 5
+
+    # Process data
+    ma_window = 21
+    fwd_reads, fwd_reads_ma, n_features = get_fwd_reads(ma_window)
+
+    # Metaparameters
+    window = 7
+    input_dim = n_features * window
+    hidden_nodes = np.array([8, 4, 2, 4, 8])
+    activation = 'sigmoid'
+    cutoff = 0.1
+
+    # Build neural net
+    model = build_model(input_dim, hidden_nodes, activation)
+
+    # Train neural net
+    training_data = get_training_data(fwd_reads_ma, genes[forward], starts[forward], ends[forward], window)
+    model.fit(training_data, training_data, epochs=3)
+
+    # Test model on each region
+    test_model(model, fwd_reads_ma, fwd_reads, window, reads, genes, starts, ends, tol)
