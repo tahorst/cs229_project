@@ -310,6 +310,58 @@ def get_labeled_spikes(region, fwd_strand, tag=ALL):
 
     return initiations, terminations
 
+def get_match_statistics(initiations, terminations, initiations_val, terminations_val, tol):
+    '''
+    Evaluates the performance of identified initiation and termination location with
+    labeled data.
+
+    Args:
+        initiations (array of int): positions of identified initiation sites
+        terminations (array of int): positions of identified termination sites
+        initiations_val (array of int): positions of labeled initiation sites
+        terminations_val (array of int): positions of labeled termination sites
+        tol (int): distance assigned peak can be from labeled peak to call correct
+
+    Returns:
+        n_val (int): number of labeled peaks
+        n_test (int): number of identified peaks
+        correct (int): number of labeled peaks identified (true positives)
+        wrong (int): number of identified peaks that are not labeled (false positives)
+        accuracy (float): percentage of accuracy
+        false_positives (float): percentage of false positives in identified peaks
+
+    Notes:
+        False negatives will be n_val - correct
+        True negatives are essentially ignored but would be the total positions in the region - n_test
+    '''
+
+    n_val = len(initiations_val) + len(terminations_val)
+    n_test = len(initiations) + len(terminations)
+    correct = 0
+    for val in initiations_val:
+        for test in initiations:
+            if np.abs(val - test) < tol:
+                correct += 1
+                break
+    for val in terminations_val:
+        for test in terminations:
+            if np.abs(val - test) < tol:
+                correct += 1
+                break
+    wrong = n_test - correct
+
+    if n_val > 0:
+        accuracy = correct / n_val * 100
+    else:
+        accuracy = 0
+
+    if n_test > 0:
+        false_positives = wrong / n_test * 100
+    else:
+        false_positives = 0
+
+    return n_val, n_test, correct, wrong, accuracy, false_positives
+
 def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     '''
     Plots the reads of the 3' and 5' data on the given strand.  Also shows any

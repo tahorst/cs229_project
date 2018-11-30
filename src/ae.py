@@ -217,6 +217,12 @@ def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, t
         ends (array of int): end position for each gene
         tol (int): distance assigned peak can be from labeled peak to call correct
         cutoff (float): cutoff of MSE value for labelling a peak
+
+    Returns:
+        total_correct (int): total number of correctly identified labeled peaks
+        total_wrong (int): total number of incorrectly identified peaks
+        total_annotated (int): total number of labeled peaks
+        total_identified (int): total number of identified peaks
     '''
 
     pad = (window - 1) // 2
@@ -260,36 +266,13 @@ def test_model(model, ma_reads, reads, window, all_reads, genes, starts, ends, t
         terminations += start
 
         # Determine accuracy of peak identification
-        # TODO: functionalize in util
-        n_val = len(initiations_val) + len(terminations_val)
-        n_test = len(initiations) + len(terminations)
-        correct = 0
-        for val in initiations_val:
-            for test in initiations:
-                if np.abs(val-test) < tol:
-                    correct += 1
-                    break
-        for val in terminations_val:
-            for test in terminations:
-                if np.abs(val-test) < tol:
-                    correct += 1
-                    break
-        wrong = n_test - correct
-
+        n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+            initiations, terminations, initiations_val, terminations_val, tol
+            )
         total_annotated += n_val
         total_identified += n_test
         total_correct += correct
         total_wrong += wrong
-
-        if n_val > 0:
-            accuracy = correct / n_val * 100
-        else:
-            accuracy = 0
-
-        if n_test > 0:
-            false_positives = wrong / n_test * 100
-        else:
-            false_positives = 0
 
         # Region statistics
         print('\tInitiations: {}'.format(initiations))
@@ -321,13 +304,15 @@ def summarize(ma_window, window, cutoff, nodes, correct, wrong, annotated, ident
         false_positive_percent = 0
 
     # Standard out
-    print('\nMA window: {}  window: {}  cutoff: {}'.format(ma_window, window, cutoff))
+    print('\nMA window: {}  window: {}  cutoff: {}  nodes: {}'.format(
+        ma_window, window, cutoff, nodes)
+        )
     print('Overall accuracy for method: {}/{} ({}%)'.format(
         correct, annotated, accuracy)
-    )
+        )
     print('Overall false positives for method: {}/{} ({}%)'.format(
         wrong, identified, false_positive_percent)
-    )
+        )
 
     # Save in summary file
     with open(SUMMARY_FILE, 'a') as f:
@@ -357,7 +342,7 @@ if __name__ == '__main__':
         [8, 4, 2, 4, 8],
         ])
 
-    # Clear summary file
+    # Write summary headers
     with open(SUMMARY_FILE, 'w') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(['MA window', 'Window', 'Cutoff', 'Hidden nodes',
@@ -365,10 +350,9 @@ if __name__ == '__main__':
 
     # Process data
     for ma_window in [1, 5, 11, 15, 21, 25, 31]:
-        fwd_reads, fwd_reads_ma, n_features = get_fwd_reads(ma_window)
+        fwd_reads, fwd_reads_ma, n_features = get_fwd_reads(reads, ma_window)
 
         for window in [1, 3, 5, 7, 11, 15, 21]:
-            # Metaparameters
             input_dim = n_features * window
             activation = 'sigmoid'
 
