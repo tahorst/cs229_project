@@ -15,6 +15,7 @@ TODO:
 
 import csv
 from datetime import datetime as dt
+import multiprocessing as mp
 import os
 
 import keras
@@ -312,6 +313,25 @@ def summarize(ma_window, window, pad, nodes, correct, wrong, annotated, identifi
         writer.writerow([ma_window, window, pad, nodes, accuracy, false_positive_percent,
             correct, annotated, wrong, identified])
 
+def main(input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads, window,
+        reads, genes, starts, ends, tol, ma_window, pad):
+    '''
+    Main function to allow for parallel evaluation of models.
+    '''
+
+    # Build neural net
+    model = build_model(input_dim, hidden_nodes, activation)
+
+    # Train neural net
+    model.fit(training_data, training_labels, epochs=5)
+
+    # Test model on each region
+    correct, wrong, annotated, identified = test_model(
+        model, fwd_reads, window, reads, genes, starts, ends, tol)
+
+    # Overall statistics
+    summarize(ma_window, window, pad, hidden_nodes, correct, wrong, annotated, identified)
+
 
 if __name__ == '__main__':
     reads = util.load_wigs()
@@ -328,6 +348,11 @@ if __name__ == '__main__':
         [3, 10, 5],
         [5, 5],
         [3, 3],
+        [32, 16, 8],
+        [10, 20, 10],
+        [20, 30, 20],
+        [30, 20, 10, 5],
+        [30, 20, 20, 10],
         ])
 
     # Write summary headers
@@ -346,16 +371,15 @@ if __name__ == '__main__':
             for pad in range(window // 2 + 1):
                 training_data, training_labels = get_data(fwd_reads, window, range(16), pad=pad)
 
-                for hidden_nodes in models:
-                    # Build neural net
-                    model = build_model(input_dim, hidden_nodes, activation)
+                pool = mp.Pool(processes=mp.cpu_count())
+                results = [pool.apply_async(main,
+                    (input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
+                    window, reads, genes, starts, ends, tol, ma_window, pad))
+                    for hidden_nodes in models]
 
-                    # Train neural net
-                    model.fit(training_data, training_labels, epochs=5)
+                pool.close()
+                pool.join()
 
-                    # Test model on each region
-                    correct, wrong, annotated, identified = test_model(
-                        model, fwd_reads, window, reads, genes, starts, ends, tol)
-
-                    # Overall statistics
-                    summarize(ma_window, window, pad, hidden_nodes, correct, wrong, annotated, identified)
+                for result in results:
+                    if not result.successful():
+                        print('*** Exception in multiprocessing ***')
