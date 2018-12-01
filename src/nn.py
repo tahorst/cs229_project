@@ -36,7 +36,7 @@ def get_data(reads, window, regions, pad=0):
 
     Args:
         reads (2D array of float): reads for each strand at each position
-            dims (strands x genome length)
+            dims (n_features x genome length)
         window (int): size of sliding window
         regions (iterable): the regions to include in training data
 
@@ -74,7 +74,7 @@ def get_data(reads, window, regions, pad=0):
                     continue
 
             labels.append(label)
-            data.append(np.hstack((reads[0, s:e], reads[1, s:e])))
+            data.append(reads[:, s:e].reshape(-1))
 
     labels = keras.utils.np_utils.to_categorical(np.array(labels))
     return np.array(data), labels
@@ -137,7 +137,7 @@ def get_spikes(prob, reads, gap=3):
 
     return initiations, terminations
 
-def get_fwd_reads(reads, ma_window):
+def get_fwd_reads(reads, ma_window, mode=1):
     '''
     Get read data for just the forward strand.
 
@@ -145,6 +145,7 @@ def get_fwd_reads(reads, ma_window):
         reads (2D array of float): reads for each strand at each position
             dims (strands x genome length)
         ma_window (int): window size for taking the moving average
+        mode (int): mode of creating data, possible values 0-1
 
     Returns:
         fwd_reads (array of float): 2D array of raw reads, dims (n_features x genome size)
@@ -152,18 +153,35 @@ def get_fwd_reads(reads, ma_window):
         n_features (int): number of features assembled
     '''
 
-    n_features = 2
-
-    convolution = np.ones((ma_window,)) / ma_window
     idx_3p = util.WIG_STRANDS.index('3f')
     idx_5p = util.WIG_STRANDS.index('5f')
 
     three_prime = reads[idx_3p, :]
     five_prime = reads[idx_5p, :]
     fwd_reads = np.vstack((three_prime, five_prime))
-    fwd_reads_ma = np.vstack((np.convolve(three_prime, convolution, 'same'),
-        np.convolve(five_prime, convolution, 'same'))
-        )
+
+    if mode == 0:
+        n_features = 2
+
+        convolution = np.ones((ma_window,)) / ma_window
+        fwd_reads_ma = np.vstack((np.convolve(three_prime, convolution, 'same'),
+            np.convolve(five_prime, convolution, 'same'))
+            )
+    elif mode == 1:
+        n_features = 4
+
+        pad = (ma_window - 1) // 2
+        convolution_back = np.ones((ma_window,)) / (pad + 1)
+        convolution_back[-pad:] = 0
+        convolution_forward = np.ones((ma_window,)) / (pad + 1)
+        convolution_forward[:pad] = 0
+
+        fwd_reads_ma = np.vstack((
+            np.convolve(three_prime, convolution_back, 'same'),
+            np.convolve(three_prime, convolution_forward, 'same'),
+            np.convolve(five_prime, convolution_back, 'same'),
+            np.convolve(five_prime, convolution_forward, 'same'),
+            ))
 
     return fwd_reads, fwd_reads_ma, n_features
 
@@ -191,7 +209,7 @@ def build_model(input_dim, hidden_nodes, activation):
 
     return model
 
-def test_model(model, reads, window, all_reads, genes, starts, ends, tol):
+def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol):
     '''
     Assesses the model performance against test data.  Outputs two plot of probabilities for
     initiation and termination peaks for each region overlayed on read data to
@@ -199,7 +217,8 @@ def test_model(model, reads, window, all_reads, genes, starts, ends, tol):
 
     Args:
         model (keras.Sequential object): compiled model object
-        reads (array of float): 2D array of raw reads, dims (n_features x genome size)
+        raw_reads (array of float): 2D array of raw reads, dims (2 x genome size)
+        reads (array of float): 2D array of processed reads, dims (n_features x genome size)
         window (int): size of window used for training data generation
         all_reads (2D array of float): reads for each strand at each position
             dims (strands x genome length)
@@ -254,7 +273,7 @@ def test_model(model, reads, window, all_reads, genes, starts, ends, tol):
         out = os.path.join(out_dir, '{}_term.png'.format(region))
         util.plot_reads(start, end, genes, starts, ends, all_reads, fit=prediction[:, 2], path=out)
 
-        initiations, terminations = get_spikes(prediction, reads[:, start:end])
+        initiations, terminations = get_spikes(prediction, raw_reads[:, start:end])
 
         initiations += start
         terminations += start
@@ -313,8 +332,8 @@ def summarize(ma_window, window, pad, nodes, correct, wrong, annotated, identifi
         writer.writerow([ma_window, window, pad, nodes, accuracy, false_positive_percent,
             correct, annotated, wrong, identified])
 
-def main(input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads, window,
-        reads, genes, starts, ends, tol, ma_window, pad):
+def main(input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
+        fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad):
     '''
     Main function to allow for parallel evaluation of models.
     '''
@@ -327,7 +346,7 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
 
     # Test model on each region
     correct, wrong, annotated, identified = test_model(
-        model, fwd_reads, window, reads, genes, starts, ends, tol)
+        model, fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol)
 
     # Overall statistics
     summarize(ma_window, window, pad, hidden_nodes, correct, wrong, annotated, identified)
@@ -369,12 +388,12 @@ if __name__ == '__main__':
             activation = 'sigmoid'
 
             for pad in range(window // 2 + 1):
-                training_data, training_labels = get_data(fwd_reads, window, range(16), pad=pad)
+                training_data, training_labels = get_data(fwd_reads_ma, window, range(16), pad=pad)
 
                 pool = mp.Pool(processes=mp.cpu_count())
                 results = [pool.apply_async(main,
                     (input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
-                    window, reads, genes, starts, ends, tol, ma_window, pad))
+                    fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad))
                     for hidden_nodes in models]
 
                 pool.close()
