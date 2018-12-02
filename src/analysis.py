@@ -14,6 +14,39 @@ import plotly.graph_objs as go
 import util
 
 
+def plot_labeled_spikes(reads, genes, starts, ends):
+    '''
+    Overlays labeled spikes with read data for each labeled region with plot
+    saved in output/labels.
+
+    Args:
+        genes (array of str): names of genes
+        starts (array of int): start position for each gene
+        ends (array of int): end position for each gene
+        reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+    '''
+
+    # Check for output directory
+    out_dir = os.path.join(util.OUTPUT_DIR, 'labels')
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+
+    fwd_strand = True
+    for region in range(util.get_n_regions(fwd_strand)):
+        initiations, terminations = util.get_labeled_spikes(region, fwd_strand)
+
+        if len(initiations) == 0 and len(terminations) == 0:
+            continue
+
+        start, end, _, _, _ = util.get_region_info(region, fwd_strand, genes, starts, ends)
+        fit = np.ones(end-start)
+        fit[initiations-start] = 2
+        fit[terminations-start] = 0.5
+
+        out = os.path.join(out_dir, '{}.png'.format(region))
+        util.plot_reads(start, end, genes, starts, ends, reads, fit=fit, path=out)
+
 def plot_interactive_reads(reads, start=0, end=100000):
     '''
     Plot reads genes for the whole genome in an interactive plot saved in
@@ -49,6 +82,9 @@ def plot_interactive_reads(reads, start=0, end=100000):
         )
 
     fig = dict(data=data, layout=layout)
+
+    if not os.path.exists(util.OUTPUT_DIR):
+        os.makedirs(util.OUTPUT_DIR)
 
     out = os.path.join(util.OUTPUT_DIR, 'interactive_reads.html')
     py.plot(fig, filename=out, auto_open=False)
@@ -112,17 +148,25 @@ if __name__ == '__main__':
     reads = util.load_wigs()
     genes, _, starts, ends = util.load_genome()
 
+    # Visualize labeled data for confirmation of correct labels
+    print('Plotting labeled spikes...')
+    plot_labeled_spikes(reads, genes, starts, ends)
+
     # Generate interactive plotly plot for identifying labeled peaks
+    print('Generating interactive plot...')
     plot_interactive_reads(reads)
 
     # Illustrate region segmentation
+    print('Plotting example segmentation...')
     for region in range(-1, 2):
         plot_region(region, genes, starts, ends, reads)
 
     # Raw read distributions
+    print('Plotting raw distributions...')
     plot_read_distributions(genes, starts, ends, reads, 'distributions')
 
     # Moving average distributions - becomes more Gaussian like
+    print('Plotting moving average distributions...')
     ma = np.zeros_like(reads)
     window = 11
     for i, strand in enumerate(reads):
