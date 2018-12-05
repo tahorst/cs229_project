@@ -1,0 +1,6 @@
+.idea/
+__pycache__/
+output/
+*.pyc
+.python-version
+*.npy
