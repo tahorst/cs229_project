@@ -6,9 +6,11 @@ import csv
 import json
 import os
 import re
+import subprocess
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'output')
@@ -30,6 +32,7 @@ LARGE = 2  # Label for spikes in regions with large operons
 # Genome information
 GENOME_SIZE = 4639675
 ANNOTATION_FILE = os.path.join(RAW_DIR, 'U00096.2.faa')
+
 
 def load_wigs(cached=None, wig_file=None, strands=None, genome_size=None):
     '''
@@ -498,3 +501,11 @@ def plot_distribution(label, start, end, reads, path=None):
     else:
         plt.savefig(path)
     plt.close('all')
+
+def get_git_hash():
+    '''
+    Returns:
+        str: git hash
+    '''
+
+    return subprocess.check_output('git rev-parse HEAD'.split()).rstrip()

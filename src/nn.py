@@ -29,7 +29,7 @@ SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'nn_summary_{}.csv'.format(
     dt.strftime(dt.now(), '%Y%m%d-%H%M%S')))
 
 
-def get_data(reads, window, regions, pad=0):
+def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
     '''
     Uses process_reads to generate training_data for genes that have been
     identified to not have spikes.
@@ -39,6 +39,9 @@ def get_data(reads, window, regions, pad=0):
             dims (n_features x genome length)
         window (int): size of sliding window
         regions (iterable): the regions to include in training data
+        down_sample (bool): if True, down samples the no spike case because of
+            class imbalance
+        training (bool): if True, skips regions that would have 2 labels for better training
 
     Returns:
         array of float: 2D array of read data, dims (m samples x n features)
@@ -47,10 +50,11 @@ def get_data(reads, window, regions, pad=0):
 
     data = []
     labels = []
+    fwd_strand = True
 
     for region in regions:
-        start, end = util.get_region_bounds(region, True)
-        initiations, terminations = util.get_labeled_spikes(region, True)
+        start, end = util.get_region_bounds(region, fwd_strand)
+        initiations, terminations = util.get_labeled_spikes(region, fwd_strand)
 
         length = end - start
         n_splits = length - window + 1
@@ -66,17 +70,28 @@ def get_data(reads, window, regions, pad=0):
                 else:
                     continue
             if np.any((terminations >= s) & (terminations <= e)):
-                if label == 1:
-                    print('*** both peaks ***')
                 if np.any((terminations >= s + pad) & (terminations <= e - pad)):
+                    if label == 1:
+                        # Exclude regions that have both an initiation and termination from training
+                        if training:
+                            continue
+                        else:
+                            print('*** both peaks ***')
                     label = 2
                 else:
+                    continue
+
+            # Down sample the cases that do not have a spike because of class imbalance
+            if down_sample:
+                if not (np.any((s > terminations) & (s < terminations + window*100))
+                        or np.any((e < initiations) & (e > initiations - window*100))
+                        or label != 0):
                     continue
 
             labels.append(label)
             data.append(reads[:, s:e].reshape(-1))
 
-    labels = keras.utils.np_utils.to_categorical(np.array(labels))
+    labels = keras.utils.np_utils.to_categorical(np.array(labels), num_classes=LABELS)
     return np.array(data), labels
 
 def get_spikes(prob, reads, gap=3):
@@ -205,11 +220,11 @@ def build_model(input_dim, hidden_nodes, activation):
     model.add(keras.layers.Dense(LABELS, activation='softmax'))
     model.summary()
 
-    model.compile(optimizer='adam', loss='categorical_crossentropy')
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
     return model
 
-def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol):
+def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, plot_desc=None):
     '''
     Assesses the model performance against test data.  Outputs two plot of probabilities for
     initiation and termination peaks for each region overlayed on read data to
@@ -226,6 +241,8 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
         starts (array of int): start position for each gene
         ends (array of int): end position for each gene
         tol (int): distance assigned peak can be from labeled peak to call correct
+        plot_desc (str): if None, will not output the plot to files, otherwise creates file names
+            starting with this string, can be buggy if used in multiprocessing
 
     Returns:
         total_correct (int): total number of correctly identified labeled peaks
@@ -262,16 +279,18 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
         prediction = np.vstack((pad_pred, prediction, pad_pred))
 
         # Plot outputs
-        ## Create directory
-        out_dir = os.path.join(util.OUTPUT_DIR, 'nn_assignments')
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir)
+        if plot_desc:
+            # Create directory
+            out_dir = os.path.join(util.OUTPUT_DIR, 'nn_assignments')
+            if not os.path.exists(out_dir):
+                os.makedirs(out_dir)
 
-        ## Plot MSE values with reads
-        out = os.path.join(out_dir, '{}_init.png'.format(region))
-        util.plot_reads(start, end, genes, starts, ends, all_reads, fit=prediction[:, 1], path=out)
-        out = os.path.join(out_dir, '{}_term.png'.format(region))
-        util.plot_reads(start, end, genes, starts, ends, all_reads, fit=prediction[:, 2], path=out)
+            # Plot softmax values with reads
+            desc = '{}_{}'.format(region, plot_desc)
+            out = os.path.join(out_dir, '{}_init.png'.format(desc))
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=prediction[:, 1], path=out)
+            out = os.path.join(out_dir, '{}_term.png'.format(desc))
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=prediction[:, 2], path=out)
 
         initiations, terminations = get_spikes(prediction, raw_reads[:, start:end])
 
@@ -287,8 +306,8 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
         total_wrong += wrong
 
         # Region statistics
-        print('\tInitiations: {}'.format(initiations))
-        print('\tTerminations: {}'.format(terminations))
+        print('\tIdentified: {}   {}'.format(initiations, terminations))
+        print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
         print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
         print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
 
@@ -333,7 +352,7 @@ def summarize(ma_window, window, pad, nodes, correct, wrong, annotated, identifi
             correct, annotated, wrong, identified])
 
 def main(input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
-        fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad):
+        fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad, plot=False):
     '''
     Main function to allow for parallel evaluation of models.
     '''
@@ -343,10 +362,15 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
 
     # Train neural net
     model.fit(training_data, training_labels, epochs=5)
+    print('\nData counts: {}'.format(np.bincount(np.where(training_labels)[1])))
 
     # Test model on each region
+    if plot:
+        plot_desc = '{}_{}_{}'.format(hidden_nodes, window, ma_window)
+    else:
+        plot_desc = None
     correct, wrong, annotated, identified = test_model(
-        model, fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol)
+        model, fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol, plot_desc)
 
     # Overall statistics
     summarize(ma_window, window, pad, hidden_nodes, correct, wrong, annotated, identified)
@@ -358,15 +382,16 @@ if __name__ == '__main__':
 
     tol = 5
     fwd_strand = True
+    plot = False
+    down_sample = False
+    parallel = True
 
     models = np.array([
         [10, 10],
         [10, 10, 10],
         [20, 10, 5],
         [30, 10, 10],
-        [3, 10, 5],
         [5, 5],
-        [3, 3],
         [32, 16, 8],
         [10, 20, 10],
         [20, 30, 20],
@@ -378,7 +403,7 @@ if __name__ == '__main__':
     with open(SUMMARY_FILE, 'w') as f:
         writer = csv.writer(f, delimiter='\t')
         writer.writerow(['MA window', 'Window', 'Pad', 'Hidden nodes', 'Accuracy (%)',
-            'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified'])
+            'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
 
     for ma_window in [1, 3, 5, 7, 11, 15, 21]:
         fwd_reads, fwd_reads_ma, n_features = get_fwd_reads(reads, ma_window)
@@ -388,17 +413,24 @@ if __name__ == '__main__':
             activation = 'sigmoid'
 
             for pad in range(window // 2 + 1):
-                training_data, training_labels = get_data(fwd_reads_ma, window, range(16), pad=pad)
+                training_data, training_labels = get_data(fwd_reads_ma, window, range(16),
+                    pad=pad, down_sample=down_sample, training=True)
 
-                pool = mp.Pool(processes=mp.cpu_count())
-                results = [pool.apply_async(main,
-                    (input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
-                    fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad))
-                    for hidden_nodes in models]
+                if parallel:
+                    pool = mp.Pool(processes=mp.cpu_count())
+                    results = [pool.apply_async(main,
+                        (input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
+                        fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad, plot))
+                        for hidden_nodes in models]
 
-                pool.close()
-                pool.join()
+                    pool.close()
+                    pool.join()
 
-                for result in results:
-                    if not result.successful():
-                        print('*** Exception in multiprocessing ***')
+                    for result in results:
+                        if not result.successful():
+                            print('*** Exception in multiprocessing ***')
+                else:
+                    for hidden_nodes in models:
+                        main(input_dim, hidden_nodes, activation, training_data, training_labels,
+                            fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol,
+                            ma_window, pad, plot=True)
