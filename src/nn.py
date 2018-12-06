@@ -45,7 +45,7 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
 
     Returns:
         array of float: 2D array of read data, dims (m samples x n features)
-        array of int: 1D array of labels, dims (m samples)
+        array of int: 2D array of 1-hot class labels, dims (m samples x n classes)
     '''
 
     data = []
@@ -152,54 +152,6 @@ def get_spikes(prob, reads, gap=3):
 
     return initiations, terminations
 
-def get_fwd_reads(reads, ma_window, mode=1):
-    '''
-    Get read data for just the forward strand.
-
-    Args:
-        reads (2D array of float): reads for each strand at each position
-            dims (strands x genome length)
-        ma_window (int): window size for taking the moving average
-        mode (int): mode of creating data, possible values 0-1
-
-    Returns:
-        fwd_reads (array of float): 2D array of raw reads, dims (n_features x genome size)
-        fwd_reads_ma (array of float): 2D array of averaged reads, dims (n_features x genome size)
-        n_features (int): number of features assembled
-    '''
-
-    idx_3p = util.WIG_STRANDS.index('3f')
-    idx_5p = util.WIG_STRANDS.index('5f')
-
-    three_prime = reads[idx_3p, :]
-    five_prime = reads[idx_5p, :]
-    fwd_reads = np.vstack((three_prime, five_prime))
-
-    if mode == 0:
-        n_features = 2
-
-        convolution = np.ones((ma_window,)) / ma_window
-        fwd_reads_ma = np.vstack((np.convolve(three_prime, convolution, 'same'),
-            np.convolve(five_prime, convolution, 'same'))
-            )
-    elif mode == 1:
-        n_features = 4
-
-        pad = (ma_window - 1) // 2
-        convolution_back = np.ones((ma_window,)) / (pad + 1)
-        convolution_back[-pad:] = 0
-        convolution_forward = np.ones((ma_window,)) / (pad + 1)
-        convolution_forward[:pad] = 0
-
-        fwd_reads_ma = np.vstack((
-            np.convolve(three_prime, convolution_back, 'same'),
-            np.convolve(three_prime, convolution_forward, 'same'),
-            np.convolve(five_prime, convolution_back, 'same'),
-            np.convolve(five_prime, convolution_forward, 'same'),
-            ))
-
-    return fwd_reads, fwd_reads_ma, n_features
-
 def build_model(input_dim, hidden_nodes, activation):
     '''
     Builds a neural net model
@@ -226,7 +178,7 @@ def build_model(input_dim, hidden_nodes, activation):
 
 def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, plot_desc=None):
     '''
-    Assesses the model performance against test data.  Outputs two plot of probabilities for
+    Assesses the model performance against test data.  Outputs two plots of probabilities for
     initiation and termination peaks for each region overlayed on read data to
     output/nn_assignments.  Displays statistics for each region and overall performance.
 
@@ -362,7 +314,6 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
 
     # Train neural net
     model.fit(training_data, training_labels, epochs=5)
-    print('\nData counts: {}'.format(np.bincount(np.where(training_labels)[1])))
 
     # Test model on each region
     if plot:
@@ -406,7 +357,7 @@ if __name__ == '__main__':
             'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
 
     for ma_window in [1, 3, 5, 7, 11, 15, 21]:
-        fwd_reads, fwd_reads_ma, n_features = get_fwd_reads(reads, ma_window)
+        fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window)
 
         for window in [5, 7, 11, 15, 21, 31]:
             input_dim = n_features * window
