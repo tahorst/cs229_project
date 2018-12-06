@@ -6,6 +6,7 @@ Usage:
 
 Output:
     Saves estimates for transcription unit assignments in output/nn_assignments/
+    Saves statistics in output/nn_summary_yyyymmdd-hhmmss.csv
 
 Parameters to search:
 
@@ -31,14 +32,14 @@ SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'nn_summary_{}.csv'.format(
 
 def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
     '''
-    Uses process_reads to generate training_data for genes that have been
-    identified to not have spikes.
+    Generates training or test data with different options.
 
     Args:
         reads (2D array of float): reads for each strand at each position
             dims (n_features x genome length)
         window (int): size of sliding window
         regions (iterable): the regions to include in training data
+        pad (int): size of pad inside the window of positive samples to not include as training
         down_sample (bool): if True, down samples the no spike case because of
             class imbalance
         training (bool): if True, skips regions that would have 2 labels for better training
@@ -224,8 +225,8 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
         start, end = util.get_region_bounds(region, fwd_strand)
 
         # Test trained model
-        test_data, test_labels = get_data(reads, window, [region])
-        prediction = model.predict(test_data)
+        x_test, y_test = get_data(reads, window, [region])
+        prediction = model.predict(x_test)
         pad_pred = np.zeros((pad, LABELS))
         pad_pred[:, 0] = 1
         prediction = np.vstack((pad_pred, prediction, pad_pred))
@@ -364,13 +365,13 @@ if __name__ == '__main__':
             activation = 'sigmoid'
 
             for pad in range(window // 2 + 1):
-                training_data, training_labels = get_data(fwd_reads_ma, window, range(16),
+                x_train, y_train = get_data(fwd_reads_ma, window, range(16),
                     pad=pad, down_sample=down_sample, training=True)
 
                 if parallel:
                     pool = mp.Pool(processes=mp.cpu_count())
                     results = [pool.apply_async(main,
-                        (input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
+                        (input_dim, hidden_nodes, activation, x_train, y_train, fwd_reads,
                         fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad, plot))
                         for hidden_nodes in models]
 
@@ -382,6 +383,6 @@ if __name__ == '__main__':
                             print('*** Exception in multiprocessing ***')
                 else:
                     for hidden_nodes in models:
-                        main(input_dim, hidden_nodes, activation, training_data, training_labels,
+                        main(input_dim, hidden_nodes, activation, x_train, y_train,
                             fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol,
                             ma_window, pad, plot=True)

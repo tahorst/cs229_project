@@ -6,8 +6,11 @@ Usage:
 
 Output:
     Saves expected initiations and terminations in output/logreg_assignments/
+    Saves statistics in output/logreg_summary_yyyymmdd-hhmmss.csv
 '''
 
+import csv
+from datetime import datetime as dt
 import os
 
 import numpy as np
@@ -16,16 +19,20 @@ from sklearn.linear_model import LogisticRegression
 import util
 
 
+SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'logreg_summary_{}.csv'.format(
+    dt.strftime(dt.now(), '%Y%m%d-%H%M%S')))
+
+
 def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
     '''
-    Uses process_reads to generate training_data for genes that have been
-    identified to not have spikes.
+    Generates training or test data with different options.
 
     Args:
         reads (2D array of float): reads for each strand at each position
             dims (n_features x genome length)
         window (int): size of sliding window
         regions (iterable): the regions to include in training data
+        pad (int): size of pad inside the window of positive samples to not include as training
         down_sample (bool): if True, down samples the no spike case because of
             class imbalance
         training (bool): if True, skips regions that would have 2 labels for better training
@@ -85,21 +92,16 @@ def get_spikes(labels, reads, gap=3):
     Identifies the initiation and termination spikes from the model output.
 
     Args:
-        prob (array of float): 2D array of probabilities for each category,
-            dims (m samples x LABELS)
-        reads (array of float): 2D array of reads for the 3' and 5' strand
-            dims: (2 x region size)
+        labels (array of int): array labels (0 or 1) for each sample (position)
+        reads (array of float): array of reads for the strand of interest in a given region
+            (5' for initiations, 3' for terminations)
         gap (int): minimum genome position gap between identified positions to call a distinct group
 
     Returns:
-        initiations (array of int): positions where transcription initiation occurs
-        terminations (array of int): positions where transcription termination occurs
-
-    TODO:
-        use cutoff instead of argmax?
+        spikes (array of int): positions of spikes
     '''
 
-    def group_spikes(spike_locations, strand):
+    def group_spikes(spike_locations, reads):
         true_spikes = []
         n_spike_locations = len(spike_locations)
 
@@ -120,7 +122,7 @@ def get_spikes(labels, reads, gap=3):
 
         # Select one point from each group to be the true initiation or termination
         for group in groups:
-            data = reads[strand, group]
+            data = reads[group]
             true_spike = np.where(data == data.max())[0]
 
             position = group[true_spike[0]]
@@ -131,105 +133,215 @@ def get_spikes(labels, reads, gap=3):
     locations = np.where(labels == 1)[0]
 
     # Add 1 to locations for actual genome location because of 0 indexing
-    spikes = np.array(group_spikes(locations, 1))
+    spikes = np.array(group_spikes(locations, reads)) + 1
 
     return spikes
 
-def train_models(reads, window, training_range):
+def train_models(reads, window, pad, training_range, weighted):
+    '''
+    Builds logistic regression models for initiations and terminations
+
+    Args:
+        reads (array of float): 2D array of processed reads, dims (n_features x genome size)
+        window (int): size of window used for training data generation
+        pad (int): size of pad inside the window of positive samples to not include as training
+        training_range (iterable of int): regions to use as training data
+        weighted (bool): if True, classes are weighted based on samples to address class
+            imbalance of positive samples
+
+    Yields:
+        LogisticRegression object: fit logistic regression model for different classes of data
+            (initiations and terminations)
     '''
 
-    '''
-
-    x_train, y_train = get_data(reads, window, training_range, training=True)
+    x_train, y_train = get_data(reads, window, training_range, pad=pad, training=True)
 
     # Generate model for classes 1 and 2 (initiations and terminations)
     for i in range(1,3):
         y = (y_train == i).astype(int)
 
-        logreg = LogisticRegression()
+        # Weight classes differently for class imbalance
+        if weighted:
+            weights = {i: count for i, count in enumerate(np.bincount(y))}
+        else:
+            weights = None
+
+        logreg = LogisticRegression(solver='liblinear', class_weight=weights)
         yield logreg.fit(x_train, y)
 
-def test_models(init_model, term_model):
+def test_models(init_model, term_model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, plot_desc=None, gap=3):
+    '''
+    Assesses the model performance against test data.  Outputs two plots for identified
+    initiation and termination peaks for each region overlayed on read data to
+    output/logreg_assignments.  Displays statistics for each region and overall performance.
+
+    Args:
+        init_model (LogisticRegression object): fit model object for initiations
+        term_model (LogisticRegression object): fit model object for terminations
+        raw_reads (array of float): 2D array of raw reads, dims (2 x genome size)
+        reads (array of float): 2D array of processed reads, dims (n_features x genome size)
+        window (int): size of window used for training data generation
+        all_reads (2D array of float): reads for each strand at each position
+            dims (strands x genome length)
+        genes (array of str): names of genes
+        starts (array of int): start position for each gene
+        ends (array of int): end position for each gene
+        tol (int): distance assigned peak can be from labeled peak to call correct
+        plot_desc (str): if None, will not output the plot to files, otherwise creates file names
+            starting with this string, can be buggy if used in multiprocessing
+        gap (int): gap between unique spike identifications
+
+    Returns:
+        total_correct (int): total number of correctly identified labeled peaks
+        total_wrong (int): total number of incorrectly identified peaks
+        total_annotated (int): total number of labeled peaks
+        total_identified (int): total number of identified peaks
     '''
 
+    test_accuracy = True
+    pad = (window - 1) // 2
+    fwd_strand = True
+    idx_3p = 0
+    idx_5p = 1
+
+    total_correct = 0
+    total_wrong = 0
+    total_annotated = 0
+    total_identified = 0
+
+    for region in range(16, util.get_n_regions(fwd_strand)):
+        initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
+
+        # Skip if only testing region with annotations
+        if test_accuracy and len(initiations_val) == 0 and len(terminations_val) == 0:
+            continue
+
+        print('\nRegion: {}'.format(region))
+
+        start, end = util.get_region_bounds(region, fwd_strand)
+
+        # Test trained model
+        x_test, y_test = get_data(reads, window, [region])
+
+        init_pred = init_model.predict(x_test)
+        term_pred = term_model.predict(x_test)
+
+        pad_pred = np.zeros(pad)
+        init_pred = np.hstack((pad_pred, init_pred, pad_pred))
+        term_pred = np.hstack((pad_pred, term_pred, pad_pred))
+
+        initiations = get_spikes(init_pred, raw_reads[idx_5p, start:end], gap) + start
+        terminations = get_spikes(term_pred, raw_reads[idx_3p, start:end], gap) + start
+
+        # Plot outputs
+        if plot_desc:
+            # Create directory
+            out_dir = os.path.join(util.OUTPUT_DIR, 'logreg_assignments')
+            if not os.path.exists(out_dir):
+                os.makedirs(out_dir)
+
+            # Plot softmax values with reads
+            desc = '{}_{}'.format(region, plot_desc)
+            out = os.path.join(out_dir, '{}_init.png'.format(desc))
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=init_pred, path=out)
+            out = os.path.join(out_dir, '{}_term.png'.format(desc))
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=term_pred, path=out)
+
+        n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+            initiations, terminations, initiations_val, terminations_val, tol
+            )
+        total_annotated += n_val
+        total_identified += n_test
+        total_correct += correct
+        total_wrong += wrong
+
+        # Region statistics
+        print('\tIdentified: {}   {}'.format(initiations, terminations))
+        print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
+        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
+        print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
+
+    return total_correct, total_wrong, total_annotated, total_identified
+
+def summarize(ma_window, window, pad, correct, wrong, annotated, identified):
+    '''
+    Print string to stdout and save results in a file.
+
+    Args:
+        ma_window (int): size of window for moving average of reads
+        window (int): size of window for feature selection
+        pad (int): size of samples to ignore when labeling peaks in training data
+        correct (int): number of correctly identified peaks
+        wrong (int): number of incorrectly identified peaks
+        annotated (int): number of peaks that have been annotated
+        identified (int): number of peaks that were identified by the algorithm
     '''
 
-    return correct, wrong, annotated, identified
+    accuracy = '{:.1f}'.format(correct / annotated * 100)
+    if identified > 0:
+        false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+    else:
+        false_positive_percent = 0
 
-def main(reads, window, training_range):
+    # Standard out
+    print('\nMA window: {}  window: {}  pad: {}'.format(ma_window, window, pad))
+    print('Overall accuracy for method: {}/{} ({}%)'.format(
+        correct, annotated, accuracy)
+        )
+    print('Overall false positives for method: {}/{} ({}%)'.format(
+        wrong, identified, false_positive_percent)
+        )
+
+    # Save in summary file
+    with open(SUMMARY_FILE, 'a') as f:
+        writer = csv.writer(f, delimiter='\t')
+        writer.writerow([ma_window, window, pad, accuracy, false_positive_percent,
+            correct, annotated, wrong, identified])
+
+def main(reads, ma_reads, all_reads, ma_window, window, pad, training_range, class_weighted,
+        tol, genes, starts, ends, plot):
+    '''
+    Main function to allow for parallel evaluation of models.
     '''
 
-    '''
+    # Train model on training regions
+    init_model, term_model = train_models(ma_reads, window, pad, training_range, class_weighted)
 
-    init_model, term_model = train_models(reads, window, training_range)
+    # Test model on other regions
+    if plot:
+        desc = '{}_{}_{}'.format(ma_window, window, pad)
+    else:
+        desc = None
+    correct, wrong, annotated, identified = test_models(init_model, term_model, reads, ma_reads,
+        window, all_reads, genes, starts, ends, tol, plot_desc=desc)
 
-    correct, wrong, annotated, identified = test_models(init_model, term_model)
+    # Print out summary statistics
+    summarize(ma_window, window, pad, correct, wrong, annotated, identified)
+
 
 if __name__ == '__main__':
     reads = util.load_wigs()
     genes, _, starts, ends = util.load_genome()
-    window = 15
-    expanded = False
-    total = True
 
+    # Hyperparameters
+    class_weighted = True
+    read_mode = 0
+    tol = 5
+    plot = True
     training_range = range(16)
 
     fwd_strand = True
 
-    main(reads, window, training_range)
+    # Write summary headers
+    with open(SUMMARY_FILE, 'w') as f:
+        writer = csv.writer(f, delimiter='\t')
+        writer.writerow(['MA window', 'Window', 'Pad', 'Accuracy (%)', 'False Positives (%)',
+            'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
 
-        x_test, y_test = get_data(reads, window, range(16,33))
-        y_train = np.array([1 if y == i else 0 for y in y_train])
-        y_test = set(np.where([1 if y == i else 0 for y in y_test])[0])
+    for ma_window in [1, 3, 5, 7, 11, 15, 21]:
+        fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window, mode=read_mode)
 
-        logreg = LogisticRegression()
-        logreg.fit(x_train, y_train)
-
-        y_pred = logreg.predict(x_test)
-        spikes = get_spikes(y_pred, reads)
-
-        correct = np.sum([1 if y in y_test else 0 for y in np.where(y_pred)[0]])
-        print('{}/{}'.format(correct, np.sum(y_pred))
-
-
-    import ipdb; ipdb.set_trace()
-
-    for region in range(util.get_n_regions(fwd_strand)):
-        print('\nRegion: {}'.format(region))
-
-        # Information for region to be analyzed
-        x = util.load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=expanded, total=total)
-        start, end, region_genes, region_starts, region_ends = util.get_region_info(
-            region, fwd_strand, genes, starts, ends)
-        n_levels = len(region_genes) + 3  # Extra level for 0 reads and spiked reads on each strand
-
-        # Fit model
-        gmm = method(n_components=n_levels)
-        gmm.fit(x)
-        labels = gmm.predict(x)
-        with np.errstate(divide='ignore'):
-            log_prob = np.log(gmm.predict_proba(x))
-        means = gmm.means_.mean(axis=1)
-
-        # Output levels
-        levels = np.array([means[l] for l in labels])
-        mle_gene_levels = np.zeros_like(levels)
-        for s, e in zip(region_starts, region_ends):
-            s = s - start
-            e = e - start
-            label = np.argmax(np.sum(log_prob[s:e, :], axis=0))
-            mle_gene_levels[s:e] = means[label]
-
-        # Plot output
-        ## Path setup
-        out_dir = os.path.join(util.OUTPUT_DIR, 'gmm_assignments')
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir)
-
-        ## Raw level assignments
-        out = os.path.join(out_dir, '{}_raw.png'.format(region))
-        util.plot_reads(start, end, genes, starts, ends, reads, fit=levels, path=out)
-
-        ## MLE per gene level assignments
-        out = os.path.join(out_dir, '{}_mle.png'.format(region))
-        util.plot_reads(start, end, genes, starts, ends, reads, fit=mle_gene_levels, path=out)
+        for window in [3, 5, 7, 11, 15, 21]:
+            for pad in range(window // 2 + 1):
+                main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, training_range,
+                    class_weighted, tol, genes, starts, ends, plot)
