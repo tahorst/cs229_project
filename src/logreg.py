@@ -145,7 +145,7 @@ def get_spikes(labels, reads, gap=3):
 
     return spikes
 
-def train_model(reads, window, pad, training_range, weighted, normalize):
+def train_model(reads, window, pad, training_range, weighted, normalize, oversample):
     '''
     Builds a logistic regression model for initiations and terminations classes.
 
@@ -156,7 +156,8 @@ def train_model(reads, window, pad, training_range, weighted, normalize):
         training_range (iterable of int): regions to use as training data
         weighted (bool): if True, classes are weighted based on samples to address class
             imbalance of positive samples
-        normalize (bool) if True, data is normalized by mean and stdev
+        normalize (bool): if True, data is normalized by mean and stdev
+        oversample (float): if positive, minority classes are oversampled by this factor with SMOTE
 
     Returns:
         LogisticRegression object: fit logistic regression model for different classes of data
@@ -164,6 +165,10 @@ def train_model(reads, window, pad, training_range, weighted, normalize):
     '''
 
     x_train, y_train = get_data(reads, window, training_range, pad=pad, training=True, normalize=normalize)
+
+    # Oversample minority for class imbalance
+    if oversample > 0:
+        x_train, y_train = util.oversample(x_train, y_train, factor=oversample)
 
     # Weight classes differently for class imbalance
     if weighted:
@@ -307,13 +312,13 @@ def summarize(ma_window, window, pad, correct, wrong, annotated, identified):
             correct, annotated, wrong, identified])
 
 def main(reads, ma_reads, all_reads, ma_window, window, pad, training_range, class_weighted,
-        normalize, tol, genes, starts, ends, plot):
+        oversample, normalize, tol, genes, starts, ends, plot):
     '''
     Main function to allow for parallel evaluation of models.
     '''
 
     # Train model on training regions
-    logreg = train_model(ma_reads, window, pad, training_range, class_weighted, normalize)
+    logreg = train_model(ma_reads, window, pad, training_range, class_weighted, normalize, oversample)
 
     # Test model on other regions
     if plot:
@@ -333,6 +338,7 @@ if __name__ == '__main__':
 
     # Hyperparameters
     class_weighted = True
+    oversample = 10
     normalize = False
     read_mode = 0
     tol = 5
@@ -353,4 +359,4 @@ if __name__ == '__main__':
         for window in [3, 5, 7, 11, 15, 21]:
             for pad in range(window // 2 + 1):
                 main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, training_range,
-                    class_weighted, normalize, tol, genes, starts, ends, plot)
+                    class_weighted, oversample, normalize, tol, genes, starts, ends, plot)

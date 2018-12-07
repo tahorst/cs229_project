@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 
+from imblearn import over_sampling
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -574,6 +575,16 @@ def plot_samples(samples, desc):
         plt.plot(sample)
         plt.savefig(out)
         plt.close('all')
+
+
+def oversample(x, y, factor=10):
+    '''
+    '''
+
+    weights = {i: count * factor for i, count in enumerate(np.bincount(y)) if i != 0}
+
+    smote = over_sampling.SMOTE(sampling_strategy=weights)
+    return smote.fit_sample(x, y)
 
 def get_git_hash():
     '''
