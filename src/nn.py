@@ -30,7 +30,7 @@ SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'nn_summary_{}.csv'.format(
     dt.strftime(dt.now(), '%Y%m%d-%H%M%S')))
 
 
-def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
+def get_data(reads, window, regions, pad=0, down_sample=False, training=False, normalize=False):
     '''
     Generates training or test data with different options.
 
@@ -43,6 +43,7 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
         down_sample (bool): if True, down samples the no spike case because of
             class imbalance
         training (bool): if True, skips regions that would have 2 labels for better training
+        normalize (bool) if True, data is normalized by mean and stdev
 
     Returns:
         array of float: 2D array of read data, dims (m samples x n features)
@@ -60,18 +61,20 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
         length = end - start
         n_splits = length - window + 1
 
+        denom = np.std(reads[:, start:end])
+
         for i in range(n_splits):
             s = start + i
             e = s + window
 
             label = 0
-            if np.any((initiations >= s) & (initiations < e)):
-                if np.any((initiations >= s + pad) & (initiations < e - pad)):
+            if np.any((initiations >= s) & (initiations <= e)):
+                if np.any((initiations >= s + pad) & (initiations <= e - pad)):
                     label = 1
                 else:
                     continue
-            if np.any((terminations >= s) & (terminations < e)):
-                if np.any((terminations >= s + pad) & (terminations < e - pad)):
+            if np.any((terminations >= s) & (terminations <= e)):
+                if np.any((terminations >= s + pad) & (terminations <= e - pad)):
                     if label == 1:
                         # Exclude regions that have both an initiation and termination from training
                         if training:
@@ -90,7 +93,11 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
                     continue
 
             labels.append(label)
-            data.append(reads[:, s-1:e-1].reshape(-1))
+            d = reads[:, s-1:e-1]
+            if normalize:
+                offset = np.mean(d, axis=1).reshape(-1, 1)
+                d = (d - offset) / denom
+            data.append(d.reshape(-1))
 
     labels = keras.utils.np_utils.to_categorical(np.array(labels), num_classes=LABELS)
     return np.array(data), labels
@@ -177,7 +184,7 @@ def build_model(input_dim, hidden_nodes, activation):
 
     return model
 
-def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, plot_desc=None):
+def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, normalize, plot_desc=None):
     '''
     Assesses the model performance against test data.  Outputs two plots of probabilities for
     initiation and termination peaks for each region overlayed on read data to
@@ -194,6 +201,7 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
         starts (array of int): start position for each gene
         ends (array of int): end position for each gene
         tol (int): distance assigned peak can be from labeled peak to call correct
+        normalize (bool) if True, data is normalized by mean and stdev
         plot_desc (str): if None, will not output the plot to files, otherwise creates file names
             starting with this string, can be buggy if used in multiprocessing
 
@@ -225,7 +233,7 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
         start, end = util.get_region_bounds(region, fwd_strand)
 
         # Test trained model
-        x_test, y_test = get_data(reads, window, [region])
+        x_test, y_test = get_data(reads, window, [region], normalize=normalize)
         prediction = model.predict(x_test)
         pad_pred = np.zeros((pad, LABELS))
         pad_pred[:, 0] = 1
@@ -266,7 +274,7 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
 
     return total_correct, total_wrong, total_annotated, total_identified
 
-def summarize(ma_window, window, pad, nodes, correct, wrong, annotated, identified):
+def summarize(ma_window, window, pad, nodes, oversample, correct, wrong, annotated, identified):
     '''
     Print string to stdout and save results in a file.
 
@@ -275,6 +283,7 @@ def summarize(ma_window, window, pad, nodes, correct, wrong, annotated, identifi
         window (int): size of window for feature selection
         pad (int): size of samples to ignore when labeling peaks in training data
         nodes (array of int): number of nodes at each hidden layer
+        oversample (float): if positive, minority classes are oversampled by this factor with SMOTE
         correct (int): number of correctly identified peaks
         wrong (int): number of incorrectly identified peaks
         annotated (int): number of peaks that have been annotated
@@ -288,8 +297,8 @@ def summarize(ma_window, window, pad, nodes, correct, wrong, annotated, identifi
         false_positive_percent = 0
 
     # Standard out
-    print('\nMA window: {}  window: {}  pad: {}  nodes: {}'.format(
-        ma_window, window, pad, nodes)
+    print('\nMA window: {}  window: {}  pad: {}  nodes: {}  oversample: {}'.format(
+        ma_window, window, pad, nodes, oversample)
         )
     print('Overall accuracy for method: {}/{} ({}%)'.format(
         correct, annotated, accuracy)
@@ -301,11 +310,12 @@ def summarize(ma_window, window, pad, nodes, correct, wrong, annotated, identifi
     # Save in summary file
     with open(SUMMARY_FILE, 'a') as f:
         writer = csv.writer(f, delimiter='\t')
-        writer.writerow([ma_window, window, pad, nodes, accuracy, false_positive_percent,
+        writer.writerow([ma_window, window, pad, nodes, oversample, accuracy, false_positive_percent,
             correct, annotated, wrong, identified])
 
 def main(input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
-        fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad, plot=False):
+        fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, oversample, normalize,
+        pad, plot=False):
     '''
     Main function to allow for parallel evaluation of models.
     '''
@@ -314,7 +324,7 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
     model = build_model(input_dim, hidden_nodes, activation)
 
     # Train neural net
-    model.fit(training_data, training_labels, epochs=5)
+    model.fit(training_data, training_labels, epochs=3)
 
     # Test model on each region
     if plot:
@@ -322,10 +332,10 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
     else:
         plot_desc = None
     correct, wrong, annotated, identified = test_model(
-        model, fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol, plot_desc)
+        model, fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol, normalize, plot_desc)
 
     # Overall statistics
-    summarize(ma_window, window, pad, hidden_nodes, correct, wrong, annotated, identified)
+    summarize(ma_window, window, pad, hidden_nodes, oversample, correct, wrong, annotated, identified)
 
 
 if __name__ == '__main__':
@@ -336,29 +346,31 @@ if __name__ == '__main__':
     fwd_strand = True
     plot = False
     down_sample = False
+    normalize = False
+    read_mode = 0
     parallel = True
 
     models = np.array([
-        [10, 10],
-        [10, 10, 10],
-        [20, 10, 5],
-        [30, 10, 10],
-        [5, 5],
-        [32, 16, 8],
-        [10, 20, 10],
-        [20, 30, 20],
-        [30, 20, 10, 5],
         [30, 20, 20, 10],
+        [30, 20, 10, 5],
+        [20, 30, 20],
+        [32, 16, 8],
+        [30, 10, 10],
+        [10, 20, 10],
+        [20, 10, 5],
+        [10, 10, 10],
+        [10, 10],
+        [5, 5],
         ])
 
     # Write summary headers
     with open(SUMMARY_FILE, 'w') as f:
         writer = csv.writer(f, delimiter='\t')
-        writer.writerow(['MA window', 'Window', 'Pad', 'Hidden nodes', 'Accuracy (%)',
+        writer.writerow(['MA window', 'Window', 'Pad', 'Hidden nodes', 'Oversample', 'Accuracy (%)',
             'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
 
     for ma_window in [1, 3, 5, 7, 11, 15, 21]:
-        fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window)
+        fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window, mode=read_mode)
 
         for window in [5, 7, 11, 15, 21, 31]:
             input_dim = n_features * window
@@ -366,23 +378,30 @@ if __name__ == '__main__':
 
             for pad in range(window // 2 + 1):
                 x_train, y_train = get_data(fwd_reads_ma, window, range(16),
-                    pad=pad, down_sample=down_sample, training=True)
+                    pad=pad, down_sample=down_sample, training=True, normalize=normalize)
 
-                if parallel:
-                    pool = mp.Pool(processes=mp.cpu_count())
-                    results = [pool.apply_async(main,
-                        (input_dim, hidden_nodes, activation, x_train, y_train, fwd_reads,
-                        fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window, pad, plot))
-                        for hidden_nodes in models]
+                # Oversample minority for class imbalance
+                for oversample in [0, 2, 5, 10, 20]:
+                    if oversample > 0:
+                        x_train, y_train = util.oversample(x_train, np.argmax(y_train, axis=1), factor=oversample)
+                        y_train = keras.utils.np_utils.to_categorical(np.array(y_train), num_classes=LABELS)
 
-                    pool.close()
-                    pool.join()
+                    if parallel:
+                        pool = mp.Pool(processes=mp.cpu_count())
+                        results = [pool.apply_async(main,
+                            (input_dim, hidden_nodes, activation, x_train, y_train, fwd_reads,
+                            fwd_reads_ma, window, reads, genes, starts, ends, tol, ma_window,
+                            oversample, normalize, pad, plot))
+                            for hidden_nodes in models]
 
-                    for result in results:
-                        if not result.successful():
-                            print('*** Exception in multiprocessing ***')
-                else:
-                    for hidden_nodes in models:
-                        main(input_dim, hidden_nodes, activation, x_train, y_train,
-                            fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol,
-                            ma_window, pad, plot=True)
+                        pool.close()
+                        pool.join()
+
+                        for result in results:
+                            if not result.successful():
+                                print('*** Exception in multiprocessing ***')
+                    else:
+                        for hidden_nodes in models:
+                            main(input_dim, hidden_nodes, activation, x_train, y_train,
+                                fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol,
+                                ma_window, oversample, normalize, pad, plot=True)
