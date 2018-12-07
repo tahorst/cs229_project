@@ -552,6 +552,29 @@ def plot_distribution(label, start, end, reads, path=None):
         plt.savefig(path)
     plt.close('all')
 
+def plot_samples(samples, desc):
+    '''
+    Plots the samples given in separate plots to visualize data.
+
+    Args:
+        samples (array of floats): data samples, dims (m samples, n features)
+        desc (str): description to prepend to file name
+    '''
+
+    # Check folder path
+    path = os.path.join(OUTPUT_DIR, 'samples')
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    # Save plot of each data sample
+    for i, sample in enumerate(samples):
+        out = os.path.join(path, '{}_{}.png'.format(desc, i))
+
+        plt.figure()
+        plt.plot(sample)
+        plt.savefig(out)
+        plt.close('all')
+
 def get_git_hash():
     '''
     Returns:
