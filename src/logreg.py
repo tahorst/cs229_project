@@ -19,6 +19,7 @@ from sklearn.linear_model import LogisticRegression
 import util
 
 
+LABELS = 3
 SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'logreg_summary_{}.csv'.format(
     dt.strftime(dt.now(), '%Y%m%d-%H%M%S')))
 
@@ -144,9 +145,9 @@ def get_spikes(labels, reads, gap=3):
 
     return spikes
 
-def train_models(reads, window, pad, training_range, weighted):
+def train_model(reads, window, pad, training_range, weighted, normalize):
     '''
-    Builds logistic regression models for initiations and terminations
+    Builds a logistic regression model for initiations and terminations classes.
 
     Args:
         reads (array of float): 2D array of processed reads, dims (n_features x genome size)
@@ -155,36 +156,32 @@ def train_models(reads, window, pad, training_range, weighted):
         training_range (iterable of int): regions to use as training data
         weighted (bool): if True, classes are weighted based on samples to address class
             imbalance of positive samples
+        normalize (bool) if True, data is normalized by mean and stdev
 
-    Yields:
+    Returns:
         LogisticRegression object: fit logistic regression model for different classes of data
             (initiations and terminations)
     '''
 
-    x_train, y_train = get_data(reads, window, training_range, pad=pad, training=True)
+    x_train, y_train = get_data(reads, window, training_range, pad=pad, training=True, normalize=normalize)
 
-    # Generate model for classes 1 and 2 (initiations and terminations)
-    for i in range(1,3):
-        y = (y_train == i).astype(int)
+    # Weight classes differently for class imbalance
+    if weighted:
+        weights = {i: count for i, count in enumerate(np.bincount(y_train))}
+    else:
+        weights = None
 
-        # Weight classes differently for class imbalance
-        if weighted:
-            weights = {i: count for i, count in enumerate(np.bincount(y))}
-        else:
-            weights = None
+    logreg = LogisticRegression(solver='lbfgs', multi_class='multinomial', class_weight=weights)
+    return logreg.fit(x_train, y_train)
 
-        logreg = LogisticRegression(solver='liblinear', class_weight=weights)
-        yield logreg.fit(x_train, y)
-
-def test_models(init_model, term_model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, plot_desc=None, gap=3):
+def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, normalize, plot_desc=None, gap=3):
     '''
     Assesses the model performance against test data.  Outputs two plots for identified
     initiation and termination peaks for each region overlayed on read data to
     output/logreg_assignments.  Displays statistics for each region and overall performance.
 
     Args:
-        init_model (LogisticRegression object): fit model object for initiations
-        term_model (LogisticRegression object): fit model object for terminations
+        model (LogisticRegression object): fit model object
         raw_reads (array of float): 2D array of raw reads, dims (2 x genome size)
         reads (array of float): 2D array of processed reads, dims (n_features x genome size)
         window (int): size of window used for training data generation
@@ -194,6 +191,7 @@ def test_models(init_model, term_model, raw_reads, reads, window, all_reads, gen
         starts (array of int): start position for each gene
         ends (array of int): end position for each gene
         tol (int): distance assigned peak can be from labeled peak to call correct
+        normalize (bool) if True, data is normalized by mean and stdev
         plot_desc (str): if None, will not output the plot to files, otherwise creates file names
             starting with this string, can be buggy if used in multiprocessing
         gap (int): gap between unique spike identifications
@@ -228,14 +226,16 @@ def test_models(init_model, term_model, raw_reads, reads, window, all_reads, gen
         start, end = util.get_region_bounds(region, fwd_strand)
 
         # Test trained model
-        x_test, y_test = get_data(reads, window, [region])
+        x_test, y_test = get_data(reads, window, [region], normalize=normalize)
 
-        init_pred = init_model.predict(x_test)
-        term_pred = term_model.predict(x_test)
+        decision = model.decision_function(x_test)
+        pad_pred = np.zeros((pad, LABELS))
+        pad_pred[:, 0] = 1
+        decision = np.vstack((pad_pred, decision, pad_pred))
 
-        pad_pred = np.zeros(pad)
-        init_pred = np.hstack((pad_pred, init_pred, pad_pred))
-        term_pred = np.hstack((pad_pred, term_pred, pad_pred))
+        y_pred = np.argmax(decision, axis=1)
+        init_pred = np.array(y_pred == 1, int)
+        term_pred = np.array(y_pred == 2, int)
 
         initiations = get_spikes(init_pred, raw_reads[idx_5p, start:end], gap) + start
         terminations = get_spikes(term_pred, raw_reads[idx_3p, start:end], gap) + start
@@ -248,11 +248,12 @@ def test_models(init_model, term_model, raw_reads, reads, window, all_reads, gen
                 os.makedirs(out_dir)
 
             # Plot softmax values with reads
+            normalized = -(decision / np.min(decision)) + 1
             desc = '{}_{}'.format(region, plot_desc)
             out = os.path.join(out_dir, '{}_init.png'.format(desc))
-            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=init_pred+1, path=out)
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=normalized[:, 1], path=out)
             out = os.path.join(out_dir, '{}_term.png'.format(desc))
-            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=term_pred+1, path=out)
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=normalized[:, 2], path=out)
 
         n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
             initiations, terminations, initiations_val, terminations_val, tol
@@ -306,21 +307,21 @@ def summarize(ma_window, window, pad, correct, wrong, annotated, identified):
             correct, annotated, wrong, identified])
 
 def main(reads, ma_reads, all_reads, ma_window, window, pad, training_range, class_weighted,
-        tol, genes, starts, ends, plot):
+        normalize, tol, genes, starts, ends, plot):
     '''
     Main function to allow for parallel evaluation of models.
     '''
 
     # Train model on training regions
-    init_model, term_model = train_models(ma_reads, window, pad, training_range, class_weighted)
+    logreg = train_model(ma_reads, window, pad, training_range, class_weighted, normalize)
 
     # Test model on other regions
     if plot:
         desc = '{}_{}_{}'.format(ma_window, window, pad)
     else:
         desc = None
-    correct, wrong, annotated, identified = test_models(init_model, term_model, reads, ma_reads,
-        window, all_reads, genes, starts, ends, tol, plot_desc=desc)
+    correct, wrong, annotated, identified = test_model(logreg, reads, ma_reads,
+        window, all_reads, genes, starts, ends, tol, normalize, plot_desc=desc)
 
     # Print out summary statistics
     summarize(ma_window, window, pad, correct, wrong, annotated, identified)
@@ -332,6 +333,7 @@ if __name__ == '__main__':
 
     # Hyperparameters
     class_weighted = True
+    normalize = False
     read_mode = 0
     tol = 5
     plot = True
@@ -351,4 +353,4 @@ if __name__ == '__main__':
         for window in [3, 5, 7, 11, 15, 21]:
             for pad in range(window // 2 + 1):
                 main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, training_range,
-                    class_weighted, tol, genes, starts, ends, plot)
+                    class_weighted, normalize, tol, genes, starts, ends, plot)
