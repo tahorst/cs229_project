@@ -65,13 +65,13 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
             e = s + window
 
             label = 0
-            if np.any((initiations >= s) & (initiations <= e)):
-                if np.any((initiations >= s + pad) & (initiations <= e - pad)):
+            if np.any((initiations >= s) & (initiations < e)):
+                if np.any((initiations >= s + pad) & (initiations < e - pad)):
                     label = 1
                 else:
                     continue
-            if np.any((terminations >= s) & (terminations <= e)):
-                if np.any((terminations >= s + pad) & (terminations <= e - pad)):
+            if np.any((terminations >= s) & (terminations < e)):
+                if np.any((terminations >= s + pad) & (terminations < e - pad)):
                     if label == 1:
                         # Exclude regions that have both an initiation and termination from training
                         if training:
@@ -90,7 +90,7 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
                     continue
 
             labels.append(label)
-            data.append(reads[:, s:e].reshape(-1))
+            data.append(reads[:, s-1:e-1].reshape(-1))
 
     labels = keras.utils.np_utils.to_categorical(np.array(labels), num_classes=LABELS)
     return np.array(data), labels

@@ -23,7 +23,7 @@ SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'logreg_summary_{}.csv'.format(
     dt.strftime(dt.now(), '%Y%m%d-%H%M%S')))
 
 
-def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
+def get_data(reads, window, regions, pad=0, down_sample=False, training=False, normalize=False):
     '''
     Generates training or test data with different options.
 
@@ -36,6 +36,7 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
         down_sample (bool): if True, down samples the no spike case because of
             class imbalance
         training (bool): if True, skips regions that would have 2 labels for better training
+        normalize (bool) if True, data is normalized by mean and stdev
 
     Returns:
         array of float: 2D array of read data, dims (m samples x n features)
@@ -53,18 +54,20 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
         length = end - start
         n_splits = length - window + 1
 
+        denom = np.std(reads[:, start:end])
+
         for i in range(n_splits):
             s = start + i
             e = s + window
 
             label = 0
-            if np.any((initiations >= s) & (initiations <= e)):
-                if np.any((initiations >= s + pad) & (initiations <= e - pad)):
+            if np.any((initiations >= s) & (initiations < e)):
+                if np.any((initiations >= s + pad) & (initiations < e - pad)):
                     label = 1
                 else:
                     continue
-            if np.any((terminations >= s) & (terminations <= e)):
-                if np.any((terminations >= s + pad) & (terminations <= e - pad)):
+            if np.any((terminations >= s) & (terminations < e)):
+                if np.any((terminations >= s + pad) & (terminations < e - pad)):
                     if label == 1:
                         # Exclude regions that have both an initiation and termination from training
                         if training:
@@ -83,7 +86,11 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False):
                     continue
 
             labels.append(label)
-            data.append(reads[:, s:e].reshape(-1))
+            d = reads[:, s-1:e-1]
+            if normalize:
+                offset = np.mean(d, axis=1).reshape(-1, 1)
+                d = (d - offset) / denom
+            data.append(d.reshape(-1))
 
     return np.array(data), np.array(labels)
 
@@ -243,9 +250,9 @@ def test_models(init_model, term_model, raw_reads, reads, window, all_reads, gen
             # Plot softmax values with reads
             desc = '{}_{}'.format(region, plot_desc)
             out = os.path.join(out_dir, '{}_init.png'.format(desc))
-            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=init_pred, path=out)
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=init_pred+1, path=out)
             out = os.path.join(out_dir, '{}_term.png'.format(desc))
-            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=term_pred, path=out)
+            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=term_pred+1, path=out)
 
         n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
             initiations, terminations, initiations_val, terminations_val, tol
