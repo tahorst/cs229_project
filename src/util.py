@@ -27,8 +27,9 @@ WIG_STRANDS = ['3f', '3r', '5f', '5r']
 # Spike annotations
 ANNOTATED_SPIKES_FILE = os.path.join(DATA_DIR, 'validation', 'annotated_spikes.json')
 ALL = 0  # Label for all spikes
-SMALL = 1  # Label for spikes in regions with small operons
-LARGE = 2  # Label for spikes in regions with large operons
+TRAINING = 1  # Label for training spikes
+VALIDATION = 2  # Label for validation spikes
+TEST = 3  # Label for test spikes
 
 # Genome information
 GENOME_SIZE = 4639675
@@ -338,14 +339,13 @@ def get_region_info(region, fwd_strand, genes, starts, ends):
 
     return start, end, region_genes, region_starts, region_ends
 
-def get_labeled_spikes(region, fwd_strand, tag=ALL):
+def get_labeled_spikes(region, fwd_strand):
     '''
     Gets locations of annotated spikes within a specific region.
 
     Args:
         region (int): index of region
         fwd_strand (bool): True if region is on fwd strand, False if rev
-        tag (int): which set of annotations to return (ALL, SMALL, LARGE)
 
     Returns:
         initiations (arrays of int): positions within a region where initiation occurs
@@ -362,6 +362,40 @@ def get_labeled_spikes(region, fwd_strand, tag=ALL):
 
     initiations = starts[(starts >= start) & (starts <= end)]
     terminations = ends[(ends >= start) & (ends <= end)]
+
+    return initiations, terminations
+
+def get_all_spikes(split=ALL):
+    '''
+    Gets locations of all annotated spikes.
+
+    Args:
+        split (str): data split to return (training, validation, test), returns all
+            spikes if None
+
+    Returns:
+        initiations (arrays of int): positions where initiation occurs
+        terminations (arrays of int): positions where termination occurs
+    '''
+
+    with open(ANNOTATED_SPIKES_FILE) as f:
+        data = json.load(f)
+
+    initiations = np.array(data['starts'])
+    terminations = np.array(data['ends'])
+
+    low = 0
+    high = GENOME_SIZE
+    if split == TRAINING:
+        high = 130000
+    elif split == VALIDATION:
+        low = 130000
+        high = 220000
+    elif split == TEST:
+        low = 220000
+
+    initiations = initiations[(initiations >= low) & (initiations < high)]
+    terminations = terminations[(terminations >= low) & (terminations < high)]
 
     return initiations, terminations
 

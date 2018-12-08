@@ -25,7 +25,8 @@ SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'logreg_summary_{}.csv'.format(
     dt.strftime(dt.now(), '%Y%m%d-%H%M%S')))
 
 
-def get_data(reads, window, regions, pad=0, down_sample=False, training=False, normalize=False):
+def get_data(reads, window, initiations, terminations, neg_samples, pad=0,
+        down_sample=False, training=False, normalize=False):
     '''
     Generates training, validation or test data with different options.
 
@@ -33,7 +34,9 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False, n
         reads (2D array of float): reads for each strand at each position
             dims (n_features x genome length)
         window (int): size of sliding window
-        regions (iterable): the regions to include in training data
+        initiations (array of int): the initiation locations to include in the dataset
+        terminations (array of int): the termination locations to include in the dataset
+        neg_samples (int): the number of negative samples to include on either side of the spike
         pad (int): size of pad inside the window of positive samples to not include as training
         down_sample (bool): if True, down samples the no spike case because of
             class imbalance
@@ -43,58 +46,66 @@ def get_data(reads, window, regions, pad=0, down_sample=False, training=False, n
     Returns:
         array of float: 2D array of read data, dims (m samples x n features)
         array of int: 1D array of labels, dims (m samples)
+        array of int: 1D array of genome positions, dims (m samples)
     '''
 
+    def get_region(data, start, end, matrix=False):
+        start = max(start, 0)
+        end = min(end, util.GENOME_SIZE)
+        if matrix:
+            return data[:, start:end]
+        else:
+            return data[start:end]
+
     data = []
-    labels = []
     fwd_strand = True
 
-    for region in regions:
-        start, end = util.get_region_bounds(region, fwd_strand)
-        initiations, terminations = util.get_labeled_spikes(region, fwd_strand)
+    spikes = np.sort(np.hstack((initiations, terminations)))
+    initiations = set(initiations)
+    labels = -np.ones(spikes[-1] + window + neg_samples, dtype=int)
 
-        length = end - start
-        n_splits = length - window + 1
+    if not training:
+        region = get_region(labels, spikes[0] - window, spikes[-1] + window)
+        region[:] = 0
 
-        denom = np.std(reads[:, start:end])
+    for spike in spikes:
+        if spike in initiations:
+            label = 1
+        else:
+            label = 2
 
-        for i in range(n_splits):
-            s = start + i
-            e = s + window
+        # Only include base class on either side of spike if not already assigned
+        region = get_region(labels, spike - window - neg_samples, spike - window)
+        region[region == -1] = 0
+        region = get_region(labels, spike, spike + neg_samples)
+        region[region == -1] = 0
 
-            label = 0
-            if np.any((initiations >= s) & (initiations < e)):
-                if np.any((initiations >= s + pad) & (initiations < e - pad)):
-                    label = 1
-                else:
-                    continue
-            if np.any((terminations >= s) & (terminations < e)):
-                if np.any((terminations >= s + pad) & (terminations < e - pad)):
-                    if label == 1:
-                        # Exclude regions that have both an initiation and termination from training
-                        if training:
-                            continue
-                        else:
-                            print('*** both peaks ***')
-                    label = 2
-                else:
-                    continue
+        # Always exclude padded region around spike
+        region = get_region(labels, spike - window, spike - window + pad)
+        region[:] = -2
+        region = get_region(labels, spike - pad, spike)
+        region[:] = -2
 
-            # Down sample the cases that do not have a spike because of class imbalance
-            if down_sample:
-                if not (np.any((s > terminations) & (s < terminations + window*100))
-                        or np.any((e < initiations) & (e > initiations - window*100))
-                        or label != 0):
-                    continue
+        # Exclude if two spikes in the same region for training data
+        region = get_region(labels, spike - window + pad, spike - pad)
+        if training:
+            region[(region > 0) & (region != label)] = -2
+            region[region != -2] = label
+        else:
+            region[region != -2] = label
 
-            labels.append(label)
-            d = reads[:, s-1:e-1]
-            if normalize:
-                offset = np.mean(d, axis=1).reshape(-1, 1)
-                d = (d - offset) / denom
-            data.append(d.reshape(-1))
+    positions = np.where(labels[:-window] > -1)[0]
+    labels = labels[:-window][labels[:-window] > -1]
 
-    return np.array(data), np.array(labels)
+    for pos in positions:
+        d = reads[:, pos:pos+window]
+        if normalize:
+            offset = np.mean(d, axis=1).reshape(-1, 1)
+            denom = max(np.std(get_region(reads, pos - 50, pos + window + 50, matrix=True)), 1)
+            d = (d - offset) / denom
+        data.append(d.reshape(-1))
+
+    return np.array(data), labels, positions
 
 def get_spikes(labels, reads, gap=3):
     '''
@@ -146,15 +157,15 @@ def get_spikes(labels, reads, gap=3):
 
     return spikes
 
-def train_model(reads, window, pad, training_range, weighted, normalize, oversample):
+def train_model(reads, spikes, window, pad, weighted, normalize, oversample):
     '''
     Builds a logistic regression model for initiations and terminations classes.
 
     Args:
         reads (array of float): 2D array of processed reads, dims (n_features x genome size)
+        spikes (tuple array of int): the initiation and termination locations for training
         window (int): size of window used for training data generation
         pad (int): size of pad inside the window of positive samples to not include as training
-        training_range (iterable of int): regions to use as training data
         weighted (bool): if True, classes are weighted based on samples to address class
             imbalance of positive samples
         normalize (bool): if True, data is normalized by mean and stdev
@@ -165,7 +176,8 @@ def train_model(reads, window, pad, training_range, weighted, normalize, oversam
             (initiations and terminations)
     '''
 
-    x_train, y_train = get_data(reads, window, training_range, pad=pad, training=True, normalize=normalize)
+    neg_samples = 500
+    x_train, y_train, _ = get_data(reads, window, spikes[0], spikes[1], neg_samples, pad=pad, training=True, normalize=normalize)
 
     # Oversample minority for class imbalance
     if oversample > 0:
@@ -177,10 +189,10 @@ def train_model(reads, window, pad, training_range, weighted, normalize, oversam
     else:
         weights = None
 
-    logreg = LogisticRegression(solver='lbfgs', multi_class='multinomial', class_weight=weights)
+    logreg = LogisticRegression(solver='lbfgs', multi_class='multinomial', class_weight=weights, max_iter=200)
     return logreg.fit(x_train, y_train)
 
-def validate_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, normalize, plot_desc=None, gap=3):
+def validate_model(model, raw_reads, reads, spikes, window, all_reads, genes, starts, ends, tol, normalize, plot_desc=None, gap=3):
     '''
     Assesses the model performance against validation data.  Outputs two plots for identified
     initiation and termination peaks for each region overlayed on read data to
@@ -190,6 +202,7 @@ def validate_model(model, raw_reads, reads, window, all_reads, genes, starts, en
         model (LogisticRegression object): fit model object
         raw_reads (array of float): 2D array of raw reads, dims (2 x genome size)
         reads (array of float): 2D array of processed reads, dims (n_features x genome size)
+        spikes (tuple array of int): the initiation and termination locations for validation
         window (int): size of window used for training data generation
         all_reads (2D array of float): reads for each strand at each position
             dims (strands x genome length)
@@ -203,79 +216,58 @@ def validate_model(model, raw_reads, reads, window, all_reads, genes, starts, en
         gap (int): gap between unique spike identifications
 
     Returns:
-        total_correct (int): total number of correctly identified labeled peaks
-        total_wrong (int): total number of incorrectly identified peaks
-        total_annotated (int): total number of labeled peaks
-        total_identified (int): total number of identified peaks
+        correct (int): total number of correctly identified labeled peaks
+        wrong (int): total number of incorrectly identified peaks
+        n_annotated (int): total number of labeled peaks
+        n_identified (int): total number of identified peaks
     '''
 
     test_accuracy = True
+    neg_samples = 1000
     pad = (window - 1) // 2
     fwd_strand = True
     idx_3p = 0
     idx_5p = 1
 
-    total_correct = 0
-    total_wrong = 0
-    total_annotated = 0
-    total_identified = 0
+    initiations_val, terminations_val = spikes
 
-    for region in range(16, util.get_n_regions(fwd_strand)):
-        initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
+    # Validate trained model
+    x_val, y_val, positions = get_data(reads, window, initiations_val, terminations_val, neg_samples, normalize=normalize)
+    start = positions[0]
+    end = positions[-1] + 1
 
-        # Skip if only testing region with annotations
-        if test_accuracy and len(initiations_val) == 0 and len(terminations_val) == 0:
-            continue
+    decision = model.decision_function(x_val)
+    y_pred = np.argmax(decision, axis=1)
+    init_pred = np.array(y_pred == 1, int)
+    term_pred = np.array(y_pred == 2, int)
 
-        print('\nRegion: {}'.format(region))
+    initiations = get_spikes(init_pred, raw_reads[idx_5p, start:end], gap) + start
+    terminations = get_spikes(term_pred, raw_reads[idx_3p, start:end], gap) + start
 
-        start, end = util.get_region_bounds(region, fwd_strand)
+    # Plot outputs
+    if plot_desc:
+        # Create directory
+        out_dir = os.path.join(util.OUTPUT_DIR, 'logreg_assignments')
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
 
-        # Validate trained model
-        x_val, y_val = get_data(reads, window, [region], normalize=normalize)
+        # Plot softmax values with reads
+        normalized = -(decision / np.min(decision)) + 1
+        out = os.path.join(out_dir, '{}_init.png'.format(plot_desc))
+        util.plot_reads(start, end, genes, starts, ends, all_reads, fit=normalized[:, 1], path=out)
+        out = os.path.join(out_dir, '{}_term.png'.format(plot_desc))
+        util.plot_reads(start, end, genes, starts, ends, all_reads, fit=normalized[:, 2], path=out)
 
-        decision = model.decision_function(x_val)
-        pad_pred = np.zeros((pad, LABELS))
-        pad_pred[:, 0] = 1
-        decision = np.vstack((pad_pred, decision, pad_pred))
+    n_annotated, n_identified, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+        initiations, terminations, initiations_val, terminations_val, tol
+        )
 
-        y_pred = np.argmax(decision, axis=1)
-        init_pred = np.array(y_pred == 1, int)
-        term_pred = np.array(y_pred == 2, int)
+    print('\nIdentified init: {}'.format(initiations))
+    print('Validation init: {}'.format(initiations_val))
+    print('Identified term: {}'.format(terminations))
+    print('Validation term: {}'.format(terminations_val))
 
-        initiations = get_spikes(init_pred, raw_reads[idx_5p, start:end], gap) + start
-        terminations = get_spikes(term_pred, raw_reads[idx_3p, start:end], gap) + start
-
-        # Plot outputs
-        if plot_desc:
-            # Create directory
-            out_dir = os.path.join(util.OUTPUT_DIR, 'logreg_assignments')
-            if not os.path.exists(out_dir):
-                os.makedirs(out_dir)
-
-            # Plot softmax values with reads
-            normalized = -(decision / np.min(decision)) + 1
-            desc = '{}_{}'.format(region, plot_desc)
-            out = os.path.join(out_dir, '{}_init.png'.format(desc))
-            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=normalized[:, 1], path=out)
-            out = os.path.join(out_dir, '{}_term.png'.format(desc))
-            util.plot_reads(start, end, genes, starts, ends, all_reads, fit=normalized[:, 2], path=out)
-
-        n_annotated, n_identified, correct, wrong, accuracy, false_positives = util.get_match_statistics(
-            initiations, terminations, initiations_val, terminations_val, tol
-            )
-        total_annotated += n_annotated
-        total_identified += n_identified
-        total_correct += correct
-        total_wrong += wrong
-
-        # Region statistics
-        print('\tIdentified: {}   {}'.format(initiations, terminations))
-        print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
-        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_annotated, accuracy))
-        print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_identified, false_positives))
-
-    return total_correct, total_wrong, total_annotated, total_identified
+    return correct, wrong, n_annotated, n_identified
 
 def summarize(ma_window, window, pad, correct, wrong, annotated, identified):
     '''
@@ -312,14 +304,14 @@ def summarize(ma_window, window, pad, correct, wrong, annotated, identified):
         writer.writerow([ma_window, window, pad, accuracy, false_positive_percent,
             correct, annotated, wrong, identified])
 
-def main(reads, ma_reads, all_reads, ma_window, window, pad, training_range, class_weighted,
+def main(reads, ma_reads, all_reads, ma_window, window, pad, spikes, class_weighted,
         oversample, normalize, tol, genes, starts, ends, plot):
     '''
     Main function to allow for parallel evaluation of models.
     '''
 
     # Train model on training regions
-    logreg = train_model(ma_reads, window, pad, training_range, class_weighted, normalize, oversample)
+    logreg = train_model(ma_reads, spikes['train'], window, pad, class_weighted, normalize, oversample)
 
     # Validate model on other regions
     if plot:
@@ -327,7 +319,7 @@ def main(reads, ma_reads, all_reads, ma_window, window, pad, training_range, cla
     else:
         desc = None
     correct, wrong, annotated, identified = validate_model(logreg, reads, ma_reads,
-        window, all_reads, genes, starts, ends, tol, normalize, plot_desc=desc)
+        spikes['validation'], window, all_reads, genes, starts, ends, tol, normalize, plot_desc=desc)
 
     # Print out summary statistics
     summarize(ma_window, window, pad, correct, wrong, annotated, identified)
@@ -339,15 +331,19 @@ if __name__ == '__main__':
     genes, _, starts, ends = util.load_genome()
 
     # Hyperparameters
-    class_weighted = True
-    oversample = 10
-    normalize = False
+    class_weighted = False
+    oversample = 0
+    normalize = True
     read_mode = 0
     tol = 5
     plot = True
-    training_range = range(16)
 
     fwd_strand = True
+
+    spikes = {
+        'train': util.get_all_spikes(util.TRAINING),
+        'validation': util.get_all_spikes(util.VALIDATION),
+        }
 
     # Write summary headers
     with open(SUMMARY_FILE, 'w') as f:
@@ -360,7 +356,7 @@ if __name__ == '__main__':
 
         for window in [3, 5, 7, 11, 15, 21]:
             for pad in range(window // 2 + 1):
-                main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, training_range,
+                main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, spikes,
                     class_weighted, oversample, normalize, tol, genes, starts, ends, plot)
 
     print('Completed in {:.1f} min'.format((time.time() - start_time) / 60))
