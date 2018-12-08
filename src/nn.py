@@ -34,7 +34,7 @@ SUMMARY_FILE = os.path.join(util.OUTPUT_DIR, 'nn_summary_{}.csv'.format(
 
 def get_data(reads, window, regions, pad=0, down_sample=False, training=False, normalize=False):
     '''
-    Generates training or test data with different options.
+    Generates training, validation or test data with different options.
 
     Args:
         reads (2D array of float): reads for each strand at each position
@@ -186,9 +186,9 @@ def build_model(input_dim, hidden_nodes, activation):
 
     return model
 
-def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, normalize, plot_desc=None):
+def validate_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, tol, normalize, plot_desc=None):
     '''
-    Assesses the model performance against test data.  Outputs two plots of probabilities for
+    Assesses the model performance against validation data.  Outputs two plots of probabilities for
     initiation and termination peaks for each region overlayed on read data to
     output/nn_assignments.  Displays statistics for each region and overall performance.
 
@@ -234,9 +234,9 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
 
         start, end = util.get_region_bounds(region, fwd_strand)
 
-        # Test trained model
-        x_test, y_test = get_data(reads, window, [region], normalize=normalize)
-        prediction = model.predict(x_test)
+        # Validate trained model
+        x_val, y_val = get_data(reads, window, [region], normalize=normalize)
+        prediction = model.predict(x_val)
         pad_pred = np.zeros((pad, LABELS))
         pad_pred[:, 0] = 1
         prediction = np.vstack((pad_pred, prediction, pad_pred))
@@ -260,19 +260,19 @@ def test_model(model, raw_reads, reads, window, all_reads, genes, starts, ends, 
         initiations += start
         terminations += start
 
-        n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+        n_annotated, n_identified, correct, wrong, accuracy, false_positives = util.get_match_statistics(
             initiations, terminations, initiations_val, terminations_val, tol
             )
-        total_annotated += n_val
-        total_identified += n_test
+        total_annotated += n_annotated
+        total_identified += n_identified
         total_correct += correct
         total_wrong += wrong
 
         # Region statistics
         print('\tIdentified: {}   {}'.format(initiations, terminations))
         print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
-        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
-        print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
+        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_annotated, accuracy))
+        print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_identified, false_positives))
 
     return total_correct, total_wrong, total_annotated, total_identified
 
@@ -328,12 +328,12 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
     # Train neural net
     model.fit(training_data, training_labels, epochs=3)
 
-    # Test model on each region
+    # Validate model on each region
     if plot:
         plot_desc = '{}_{}_{}'.format(hidden_nodes, window, ma_window)
     else:
         plot_desc = None
-    correct, wrong, annotated, identified = test_model(
+    correct, wrong, annotated, identified = validate_model(
         model, fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol, normalize, plot_desc)
 
     # Overall statistics
