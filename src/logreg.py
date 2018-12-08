@@ -12,6 +12,7 @@ Output:
 import csv
 from datetime import datetime as dt
 import os
+import time
 
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -333,6 +334,7 @@ def main(reads, ma_reads, all_reads, ma_window, window, pad, training_range, cla
 
 
 if __name__ == '__main__':
+    start_time = time.time()
     reads = util.load_wigs()
     genes, _, starts, ends = util.load_genome()
 
@@ -360,3 +362,5 @@ if __name__ == '__main__':
             for pad in range(window // 2 + 1):
                 main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, training_range,
                     class_weighted, oversample, normalize, tol, genes, starts, ends, plot)
+
+    print('Completed in {:.1f} min'.format((time.time() - start_time) / 60))

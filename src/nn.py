@@ -12,12 +12,14 @@ Parameters to search:
 
 TODO:
 - LOOCV
+- confusion matrix
 '''
 
 import csv
 from datetime import datetime as dt
 import multiprocessing as mp
 import os
+import time
 
 import keras
 import numpy as np
@@ -339,6 +341,7 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
 
 
 if __name__ == '__main__':
+    start_time = time.time()
     reads = util.load_wigs()
     genes, _, starts, ends = util.load_genome()
 
@@ -405,3 +408,5 @@ if __name__ == '__main__':
                             main(input_dim, hidden_nodes, activation, x_train, y_train,
                                 fwd_reads, fwd_reads_ma, window, reads, genes, starts, ends, tol,
                                 ma_window, oversample, normalize, pad, plot=True)
+
+    print('Completed in {:.1f} min'.format((time.time() - start_time) / 60))

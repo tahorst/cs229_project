@@ -301,6 +301,7 @@ def get_n_regions(fwd_strand):
     TODO:
         handle rev strand
         better representation of data to not have this function?
+        calculate number instead of hard coded
     '''
 
     return 993
@@ -558,7 +559,7 @@ def plot_samples(samples, desc):
     Plots the samples given in separate plots to visualize data.
 
     Args:
-        samples (array of floats): data samples, dims (m samples, n features)
+        samples (array of float): data samples, dims (m samples, n features)
         desc (str): description to prepend to file name
     '''
 
@@ -579,6 +580,18 @@ def plot_samples(samples, desc):
 
 def oversample(x, y, factor=10):
     '''
+    Uses the SMOTE method to over sample minority classes by a factor given.
+
+    Args:
+        x (array of float): 2D array of input data, dims (m samples, n features)
+        y (array of int): 1D array of classes, dims (m samples)
+        factor (int): factor to increase the minority samples by
+
+    Returns:
+        array of float: 2D array of input data with new samples appended to the end,
+            dims (m' samples, n features)
+        array of int: 1D array of classes with new samples appended to the end,
+            dims (m samples)
     '''
 
     weights = {i: count * factor for i, count in enumerate(np.bincount(y)) if i != 0}
