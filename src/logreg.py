@@ -329,6 +329,7 @@ if __name__ == '__main__':
     start_time = time.time()
     reads = util.load_wigs()
     genes, _, starts, ends = util.load_genome()
+    test = True
 
     # Hyperparameters
     class_weighted = False
@@ -343,20 +344,74 @@ if __name__ == '__main__':
     spikes = {
         'train': util.get_all_spikes(util.TRAINING),
         'validation': util.get_all_spikes(util.VALIDATION),
+        'test': util.get_all_spikes(util.TEST),
         }
 
-    # Write summary headers
-    with open(SUMMARY_FILE, 'w') as f:
-        writer = csv.writer(f, delimiter='\t')
-        writer.writerow(['MA window', 'Window', 'Pad', 'Accuracy (%)', 'False Positives (%)',
-            'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
-
-    for ma_window in [1, 3, 5, 7, 11, 15, 21]:
+    # Test optimal hyperparameters
+    # TODO: functionalize
+    if test:
+        ma_window = 1
+        window = 7
+        pad = 3
         fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window, mode=read_mode)
 
-        for window in [3, 5, 7, 11, 15, 21]:
-            for pad in range(window // 2 + 1):
-                main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, spikes,
-                    class_weighted, oversample, normalize, tol, genes, starts, ends, plot)
+        # Train model
+        logreg = train_model(fwd_reads_ma, spikes['train'], window, pad, class_weighted, normalize, oversample)
+
+        # Validation data
+        desc = 'validation'
+        correct, wrong, annotated, identified = validate_model(logreg, fwd_reads, fwd_reads_ma,
+            spikes['validation'], window, reads, genes, starts, ends, tol, normalize, plot_desc=desc)
+
+        accuracy = '{:.1f}'.format(correct / annotated * 100)
+        if identified > 0:
+            false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+        else:
+            false_positive_percent = 0
+
+        # Standard out
+        print('\nMA window: {}  window: {}  pad: {}'.format(ma_window, window, pad))
+        print('Overall accuracy for method: {}/{} ({}%)'.format(
+            correct, annotated, accuracy)
+            )
+        print('Overall false positives for method: {}/{} ({}%)'.format(
+            wrong, identified, false_positive_percent)
+            )
+
+        # Test data
+        desc = 'test'
+        correct, wrong, annotated, identified = validate_model(logreg, fwd_reads, fwd_reads_ma,
+            spikes['test'], window, reads, genes, starts, ends, tol, normalize, plot_desc=desc)
+
+        accuracy = '{:.1f}'.format(correct / annotated * 100)
+        if identified > 0:
+            false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+        else:
+            false_positive_percent = 0
+
+        # Standard out
+        print('\nMA window: {}  window: {}  pad: {}'.format(ma_window, window, pad))
+        print('Overall accuracy for method: {}/{} ({}%)'.format(
+            correct, annotated, accuracy)
+            )
+        print('Overall false positives for method: {}/{} ({}%)'.format(
+            wrong, identified, false_positive_percent)
+            )
+
+    # Search for optimal hyperparameters
+    else:
+        # Write summary headers
+        with open(SUMMARY_FILE, 'w') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['MA window', 'Window', 'Pad', 'Accuracy (%)', 'False Positives (%)',
+                'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
+
+        for ma_window in [1, 3, 5, 7, 11, 15, 21]:
+            fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window, mode=read_mode)
+
+            for window in [3, 5, 7, 11, 15, 21]:
+                for pad in range(window // 2 + 1):
+                    main(fwd_reads, fwd_reads_ma, reads, ma_window, window, pad, spikes,
+                        class_weighted, oversample, normalize, tol, genes, starts, ends, plot)
 
     print('Completed in {:.1f} min'.format((time.time() - start_time) / 60))
