@@ -80,6 +80,8 @@ if __name__ == '__main__':
     start_time = time.time()
     reads = util.load_wigs()
     genes, _, starts, ends = util.load_genome()
+    test = True
+
     window = 1
     tol = 5
     expanded = False
@@ -88,83 +90,97 @@ if __name__ == '__main__':
 
     fwd_strand = True
 
-    stats = {}
+    series_list = [range(33)]  # Validation set of regions
 
-    for region in range(util.get_n_regions(fwd_strand)):
-        initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
+    # Evaluate validation and test sets with optimal parameters
+    if test:
+        eps_list = [2]
+        min_samples_list = [15]
+        series_list.append(range(33, 53))
+    # Search for optimal parameters with validation set
+    else:
+        eps_list = [0.5, 1, 1.5, 2, 2.5, 3, 4, 5]
+        min_samples_list = [2, 3, 5, 7, 10, 15]
 
-        # Skip if only testing region with annotations
-        if test_accuracy and len(initiations_val) == 0 and len(terminations_val) == 0:
-            continue
+    for series in series_list:
+        stats = {}
+        for region in series:
+            initiations_val, terminations_val = util.get_labeled_spikes(region, fwd_strand)
 
-        print('\nRegion: {}'.format(region))
-        x = util.load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=expanded, total=total)
-        start, end, region_genes, region_starts, region_ends = util.get_region_info(
-            region, fwd_strand, genes, starts, ends)
+            # Skip if only testing region with annotations
+            if test_accuracy and len(initiations_val) == 0 and len(terminations_val) == 0:
+                continue
 
-        # Model parameters
-        for eps in [0.5, 1, 1.5, 2, 2.5, 3, 4, 5]:
-            print('  eps: {}'.format(eps))
-            for min_samples in [2, 3, 5, 7, 10, 15]:
-                pair = (eps, min_samples)
-                if pair not in stats:
-                    stats[pair] = {
-                        'annotated': 0,
-                        'identified': 0,
-                        'correct': 0,
-                        'wrong': 0,
-                        }
-                print('    min_samples: {}'.format(min_samples))
-                # Fit model
-                clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(x)
-                labels = clustering.labels_
+            print('\nRegion: {}'.format(region))
+            x = util.load_region_reads(reads, region, fwd_strand, ma_window=window, expanded=expanded, total=total)
+            start, end, region_genes, region_starts, region_ends = util.get_region_info(
+                region, fwd_strand, genes, starts, ends)
 
-                # Plot output
-                ## Path setup
-                out_dir = os.path.join(util.OUTPUT_DIR, 'dbscan_assignments')
-                if not os.path.exists(out_dir):
-                    os.makedirs(out_dir)
+            # Model parameters
+            for eps in eps_list:
+                print('  eps: {}'.format(eps))
+                for min_samples in min_samples_list:
+                    pair = (eps, min_samples)
+                    if pair not in stats:
+                        stats[pair] = {
+                            'annotated': 0,
+                            'identified': 0,
+                            'correct': 0,
+                            'wrong': 0,
+                            }
+                    print('    min_samples: {}'.format(min_samples))
+                    # Fit model
+                    clustering = DBSCAN(eps=eps, min_samples=min_samples).fit(x)
+                    labels = clustering.labels_
 
-                ## Raw level assignments
-                out = os.path.join(out_dir, '{}_cluster_{}_{}.png'.format(region, eps, min_samples))
-                util.plot_reads(start, end, genes, starts, ends, reads, fit=clustering.labels_+2, path=out)
+                    # Plot output
+                    ## Path setup
+                    out_dir = os.path.join(util.OUTPUT_DIR, 'dbscan_assignments')
+                    if not os.path.exists(out_dir):
+                        os.makedirs(out_dir)
 
-                initiations, terminations = get_spikes(np.where(labels == -1)[0], reads[(0,2), start:end])
-                initiations += start
-                terminations += start
+                    ## Raw level assignments
+                    out = os.path.join(out_dir, '{}_cluster_{}_{}.png'.format(region, eps, min_samples))
+                    util.plot_reads(start, end, genes, starts, ends, reads, fit=clustering.labels_+2, path=out)
 
-                n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
-                    initiations, terminations, initiations_val, terminations_val, tol
-                )
-                stats[pair]['annotated'] += n_val
-                stats[pair]['identified'] += n_test
-                stats[pair]['correct'] += correct
-                stats[pair]['wrong'] += wrong
+                    initiations, terminations = get_spikes(np.where(labels == -1)[0], reads[(0,2), start:end])
+                    initiations += start
+                    terminations += start
 
-                # Region statistics
-                print('\tIdentified: {}   {}'.format(initiations, terminations))
-                print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
-                print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
-                print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
+                    n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+                        initiations, terminations, initiations_val, terminations_val, tol
+                    )
+                    stats[pair]['annotated'] += n_val
+                    stats[pair]['identified'] += n_test
+                    stats[pair]['correct'] += correct
+                    stats[pair]['wrong'] += wrong
 
-    # Save summary output statistics
-    with open(SUMMARY_FILE, 'w') as f:
-        writer = csv.writer(f, delimiter='\t')
-        writer.writerow(['eps', 'min samples', 'Accuracy (%)', 'False Positives (%)',
-            'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])\
+                    # Region statistics
+                    print('\tIdentified: {}   {}'.format(initiations, terminations))
+                    print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
+                    print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
+                    print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
 
-        for (eps, min_samples), d in stats.items():
-            correct = d['correct']
-            wrong = d['wrong']
-            identified = d['identified']
-            annotated = d['annotated']
-            accuracy = '{:.1f}'.format(correct / annotated * 100)
-            if identified > 0:
-                false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
-            else:
-                false_positive_percent = 0
+        # Save summary output statistics
+        with open(SUMMARY_FILE, 'w') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['eps', 'min samples', 'Accuracy (%)', 'False Positives (%)',
+                'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])\
 
-            writer.writerow([eps, min_samples, accuracy, false_positive_percent,
-                correct, annotated, wrong, identified])
+            for (eps, min_samples), d in stats.items():
+                correct = d['correct']
+                wrong = d['wrong']
+                identified = d['identified']
+                annotated = d['annotated']
+                accuracy = '{:.1f}'.format(correct / annotated * 100)
+                if identified > 0:
+                    false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+                else:
+                    false_positive_percent = 0
+
+                print('Overall Accuracy: {}/{} ({}%)'.format(correct, annotated, accuracy))
+                print('Overall False positives: {}/{} ({}%)'.format(wrong, identified, false_positive_percent))
+                writer.writerow([eps, min_samples, accuracy, false_positive_percent,
+                    correct, annotated, wrong, identified])
 
     print('Completed in {:.1f} min'.format((time.time() - start_time) / 60))
