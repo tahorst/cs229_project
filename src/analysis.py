@@ -59,6 +59,7 @@ def plot_interactive_reads(reads, start=0, end=100000):
         end (int): ending index of reads to plot
     '''
 
+    reads += 0.1  # to display 0 counts after taking log
     x = list(range(start, end))
     with np.errstate(divide='ignore'):
         three_prime = go.Scatter(
