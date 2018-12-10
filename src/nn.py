@@ -308,7 +308,7 @@ def summarize(ma_window, window, pad, nodes, oversample, correct, wrong, annotat
         writer.writerow([ma_window, window, pad, nodes, oversample, accuracy, false_positive_percent,
             correct, annotated, wrong, identified])
 
-def main(input_dim, hidden_nodes, activation, training_data, training_labels, fwd_reads,
+def main(input_dim, hidden_nodes, activation, x_train, y_train, fwd_reads,
         fwd_reads_ma, spikes_val, window, reads, genes, starts, ends, tol, ma_window, oversample, normalize,
         pad, plot=False):
     '''
@@ -319,7 +319,7 @@ def main(input_dim, hidden_nodes, activation, training_data, training_labels, fw
     model = build_model(input_dim, hidden_nodes, activation)
 
     # Train neural net
-    model.fit(training_data, training_labels, epochs=3)
+    model.fit(x_train, y_train, epochs=3)
 
     # Validate model on each region
     if plot:
@@ -337,13 +337,14 @@ if __name__ == '__main__':
     start_time = time.time()
     reads = util.load_wigs()
     genes, _, starts, ends = util.load_genome()
+    test = True
 
     tol = 5
     fwd_strand = True
     plot = False
     down_sample = False
     normalize = False
-    read_mode = 0
+    read_mode = 1
     parallel = True
     neg_samples = 500
 
@@ -362,48 +363,120 @@ if __name__ == '__main__':
 
     spikes_train = util.get_all_spikes(util.TRAINING)
     spikes_val = util.get_all_spikes(util.VALIDATION)
+    spikes_test = util.get_all_spikes(util.TEST)
 
-    # Write summary headers
-    with open(SUMMARY_FILE, 'w') as f:
-        writer = csv.writer(f, delimiter='\t')
-        writer.writerow(['MA window', 'Window', 'Pad', 'Hidden nodes', 'Oversample', 'Accuracy (%)',
-            'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
+    # Test optimal hyperparameters
+    # TODO: functionalize
+    if test:
+        ma_window = 15
+        window = 5
+        pad = 0
+        oversample = 2
+        hidden_nodes = [20, 30, 20]
+        activation = 'sigmoid'
 
-    for ma_window in [1, 3, 5, 7, 11, 15, 21]:
+        # Get data
         fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window, mode=read_mode)
+        input_dim = n_features * window
+        x_train, y_train, _ = get_data(fwd_reads_ma, window, spikes_train[0], spikes_train[1], neg_samples,
+            pad=pad, down_sample=down_sample, training=True, normalize=normalize)
+        if oversample > 0:
+            x_train, y_train = util.oversample(x_train, np.argmax(y_train, axis=1), factor=oversample)
+            y_train = keras.utils.np_utils.to_categorical(np.array(y_train), num_classes=LABELS)
 
-        for window in [5, 7, 11, 15, 21, 31]:
-            input_dim = n_features * window
-            activation = 'sigmoid'
+        # Build neural net
+        model = build_model(input_dim, hidden_nodes, activation)
 
-            for pad in range(window // 2 + 1):
-                x_train, y_train, _ = get_data(fwd_reads_ma, window, spikes_train[0], spikes_train[1], neg_samples,
-                    pad=pad, down_sample=down_sample, training=True, normalize=normalize)
+        # Train neural net
+        model.fit(x_train, y_train, epochs=3)
 
-                # Oversample minority for class imbalance
-                for oversample in [0, 2, 5, 10, 20]:
-                    if oversample > 0:
-                        x_train, y_train = util.oversample(x_train, np.argmax(y_train, axis=1), factor=oversample)
-                        y_train = keras.utils.np_utils.to_categorical(np.array(y_train), num_classes=LABELS)
+        # Validate model on each region
+        plot_desc = 'validation'
+        correct, wrong, annotated, identified = validate_model(
+            model, fwd_reads, fwd_reads_ma, spikes_val, window, reads, genes, starts, ends, tol, normalize, plot_desc)
 
-                    if parallel:
-                        pool = mp.Pool(processes=mp.cpu_count())
-                        results = [pool.apply_async(main,
-                            (input_dim, hidden_nodes, activation, x_train, y_train, fwd_reads,
-                            fwd_reads_ma, spikes_val, window, reads, genes, starts, ends, tol, ma_window,
-                            oversample, normalize, pad, plot))
-                            for hidden_nodes in models]
+        # Print summary
+        accuracy = '{:.1f}'.format(correct / annotated * 100)
+        if identified > 0:
+            false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+        else:
+            false_positive_percent = 0
 
-                        pool.close()
-                        pool.join()
+        print('\nMA window: {}  window: {}  pad: {}  nodes: {}  oversample: {}'.format(
+            ma_window, window, pad, hidden_nodes, oversample)
+            )
+        print('Overall accuracy for method: {}/{} ({}%)'.format(
+            correct, annotated, accuracy)
+            )
+        print('Overall false positives for method: {}/{} ({}%)'.format(
+            wrong, identified, false_positive_percent)
+            )
 
-                        for result in results:
-                            if not result.successful():
-                                print('*** Exception in multiprocessing ***')
-                    else:
-                        for hidden_nodes in models:
-                            main(input_dim, hidden_nodes, activation, x_train, y_train,
-                                fwd_reads, fwd_reads_ma, spikes_val, window, reads, genes, starts, ends, tol,
-                                ma_window, oversample, normalize, pad, plot=True)
+        # Test model on each region
+        plot_desc = 'test'
+        correct, wrong, annotated, identified = validate_model(
+            model, fwd_reads, fwd_reads_ma, spikes_test, window, reads, genes, starts, ends, tol, normalize, plot_desc)
+
+        # Print summary
+        accuracy = '{:.1f}'.format(correct / annotated * 100)
+        if identified > 0:
+            false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+        else:
+            false_positive_percent = 0
+
+        print('\nMA window: {}  window: {}  pad: {}  nodes: {}  oversample: {}'.format(
+            ma_window, window, pad, hidden_nodes, oversample)
+            )
+        print('Overall accuracy for method: {}/{} ({}%)'.format(
+            correct, annotated, accuracy)
+            )
+        print('Overall false positives for method: {}/{} ({}%)'.format(
+            wrong, identified, false_positive_percent)
+            )
+
+    # Search for optimal hyperparameters
+    else:
+        # Write summary headers
+        with open(SUMMARY_FILE, 'w') as f:
+            writer = csv.writer(f, delimiter='\t')
+            writer.writerow(['MA window', 'Window', 'Pad', 'Hidden nodes', 'Oversample', 'Accuracy (%)',
+                'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
+
+        for ma_window in [1, 3, 5, 7, 11, 15, 21]:
+            fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window, mode=read_mode)
+
+            for window in [5, 7, 11, 15, 21, 31]:
+                input_dim = n_features * window
+                activation = 'sigmoid'
+
+                for pad in range(window // 2 + 1):
+                    x_train, y_train, _ = get_data(fwd_reads_ma, window, spikes_train[0], spikes_train[1], neg_samples,
+                        pad=pad, down_sample=down_sample, training=True, normalize=normalize)
+
+                    # Oversample minority for class imbalance
+                    for oversample in [0, 2, 5, 10, 20]:
+                        if oversample > 0:
+                            x_train, y_train = util.oversample(x_train, np.argmax(y_train, axis=1), factor=oversample)
+                            y_train = keras.utils.np_utils.to_categorical(np.array(y_train), num_classes=LABELS)
+
+                        if parallel:
+                            pool = mp.Pool(processes=mp.cpu_count())
+                            results = [pool.apply_async(main,
+                                (input_dim, hidden_nodes, activation, x_train, y_train, fwd_reads,
+                                fwd_reads_ma, spikes_val, window, reads, genes, starts, ends, tol, ma_window,
+                                oversample, normalize, pad, plot))
+                                for hidden_nodes in models]
+
+                            pool.close()
+                            pool.join()
+
+                            for result in results:
+                                if not result.successful():
+                                    print('*** Exception in multiprocessing ***')
+                        else:
+                            for hidden_nodes in models:
+                                main(input_dim, hidden_nodes, activation, x_train, y_train,
+                                    fwd_reads, fwd_reads_ma, spikes_val, window, reads, genes, starts, ends, tol,
+                                    ma_window, oversample, normalize, pad, plot=True)
 
     print('Completed in {:.1f} min'.format((time.time() - start_time) / 60))
