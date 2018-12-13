@@ -258,7 +258,7 @@ def validate_model(model, raw_reads, reads, spikes, window, all_reads, genes, st
     initiations += start
     terminations += start
 
-    n_annotated, n_identified, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+    n_annotated, n_identified, correct, wrong, recall, precision = util.get_match_statistics(
         initiations, terminations, initiations_val, terminations_val, tol
         )
 
@@ -285,27 +285,27 @@ def summarize(ma_window, window, pad, nodes, oversample, correct, wrong, annotat
         identified (int): number of peaks that were identified by the algorithm
     '''
 
-    accuracy = '{:.1f}'.format(correct / annotated * 100)
+    recall = '{:.1f}'.format(correct / annotated * 100)
     if identified > 0:
-        false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+        precision = '{:.1f}'.format(correct / identified * 100)
     else:
-        false_positive_percent = 0
+        precision = 0
 
     # Standard out
     print('\nMA window: {}  window: {}  pad: {}  nodes: {}  oversample: {}'.format(
         ma_window, window, pad, nodes, oversample)
         )
-    print('Overall accuracy for method: {}/{} ({}%)'.format(
-        correct, annotated, accuracy)
+    print('Overall recall for method: {}/{} ({}%)'.format(
+        correct, annotated, recall)
         )
-    print('Overall false positives for method: {}/{} ({}%)'.format(
-        wrong, identified, false_positive_percent)
+    print('Overall precision for method: {}/{} ({}%)'.format(
+        correct, identified, precision)
         )
 
     # Save in summary file
     with open(SUMMARY_FILE, 'a') as f:
         writer = csv.writer(f, delimiter='\t')
-        writer.writerow([ma_window, window, pad, nodes, oversample, accuracy, false_positive_percent,
+        writer.writerow([ma_window, window, pad, nodes, oversample, recall, precision,
             correct, annotated, wrong, identified])
 
 def main(input_dim, hidden_nodes, activation, x_train, y_train, fwd_reads,
@@ -396,20 +396,20 @@ if __name__ == '__main__':
             model, fwd_reads, fwd_reads_ma, spikes_val, window, reads, genes, starts, ends, tol, normalize, plot_desc)
 
         # Print summary
-        accuracy = '{:.1f}'.format(correct / annotated * 100)
+        recall = '{:.1f}'.format(correct / annotated * 100)
         if identified > 0:
-            false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+            precision = '{:.1f}'.format(correct / identified * 100)
         else:
-            false_positive_percent = 0
+            precision = 0
 
         print('\nMA window: {}  window: {}  pad: {}  nodes: {}  oversample: {}'.format(
             ma_window, window, pad, hidden_nodes, oversample)
             )
-        print('Overall accuracy for method: {}/{} ({}%)'.format(
-            correct, annotated, accuracy)
+        print('Overall recall for method: {}/{} ({}%)'.format(
+            correct, annotated, recall)
             )
-        print('Overall false positives for method: {}/{} ({}%)'.format(
-            wrong, identified, false_positive_percent)
+        print('Overall precision for method: {}/{} ({}%)'.format(
+            correct, identified, precision)
             )
 
         # Test model on each region
@@ -418,20 +418,20 @@ if __name__ == '__main__':
             model, fwd_reads, fwd_reads_ma, spikes_test, window, reads, genes, starts, ends, tol, normalize, plot_desc)
 
         # Print summary
-        accuracy = '{:.1f}'.format(correct / annotated * 100)
+        recall = '{:.1f}'.format(correct / annotated * 100)
         if identified > 0:
-            false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+            precision = '{:.1f}'.format(correct / identified * 100)
         else:
-            false_positive_percent = 0
+            precision = 0
 
         print('\nMA window: {}  window: {}  pad: {}  nodes: {}  oversample: {}'.format(
             ma_window, window, pad, hidden_nodes, oversample)
             )
-        print('Overall accuracy for method: {}/{} ({}%)'.format(
-            correct, annotated, accuracy)
+        print('Overall recall for method: {}/{} ({}%)'.format(
+            correct, annotated, recall)
             )
-        print('Overall false positives for method: {}/{} ({}%)'.format(
-            wrong, identified, false_positive_percent)
+        print('Overall precision for method: {}/{} ({}%)'.format(
+            correct, identified, precision)
             )
 
     # Search for optimal hyperparameters
@@ -439,8 +439,8 @@ if __name__ == '__main__':
         # Write summary headers
         with open(SUMMARY_FILE, 'w') as f:
             writer = csv.writer(f, delimiter='\t')
-            writer.writerow(['MA window', 'Window', 'Pad', 'Hidden nodes', 'Oversample', 'Accuracy (%)',
-                'False Positives (%)', 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
+            writer.writerow(['MA window', 'Window', 'Pad', 'Hidden nodes', 'Oversample', 'Recall (%)',
+                'Precision (%)', 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])
 
         for ma_window in [1, 3, 5, 7, 11, 15, 21]:
             fwd_reads, fwd_reads_ma, n_features = util.get_fwd_reads(reads, ma_window, mode=read_mode)

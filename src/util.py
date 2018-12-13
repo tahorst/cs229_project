@@ -416,8 +416,8 @@ def get_match_statistics(initiations, terminations, initiations_val, termination
         n_test (int): number of identified peaks
         correct (int): number of labeled peaks identified (true positives)
         wrong (int): number of identified peaks that are not labeled (false positives)
-        accuracy (float): percentage of accuracy
-        false_positives (float): percentage of false positives in identified peaks
+        recall (float): percentage of recall
+        precision (float): percentage of precision
 
     Notes:
         False negatives will be n_val - correct
@@ -440,16 +440,16 @@ def get_match_statistics(initiations, terminations, initiations_val, termination
     wrong = n_test - correct
 
     if n_val > 0:
-        accuracy = correct / n_val * 100
+        recall = correct / n_val * 100
     else:
-        accuracy = 0
+        recall = 0
 
     if n_test > 0:
-        false_positives = wrong / n_test * 100
+        precision = correct / n_test * 100
     else:
-        false_positives = 0
+        precision = 0
 
-    return n_val, n_test, correct, wrong, accuracy, false_positives
+    return n_val, n_test, correct, wrong, recall, precision
 
 def plot_reads(start, end, genes, starts, ends, reads, fit=None, path=None):
     '''

@@ -206,15 +206,15 @@ if __name__ == '__main__':
                         initiations += start
                         terminations += start
 
-                        n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+                        n_val, n_test, correct, wrong, recall, precision = util.get_match_statistics(
                             initiations, terminations, initiations_val, terminations_val, tol
                             )
 
                         # Region statistics
                         print('\tIdentified: {}   {}'.format(initiations, terminations))
                         print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
-                        print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
-                        print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
+                        print('\tRecall: {}/{} ({:.1f}%)'.format(correct, n_val, recall))
+                        print('\tPrecision: {}/{} ({:.1f}%)'.format(correct, n_test, precision))
 
                         total_annotated += n_val
                         total_identified += n_test
@@ -222,14 +222,14 @@ if __name__ == '__main__':
                         total_wrong += wrong
 
                     # Summary
-                    accuracy = total_correct / total_annotated * 100
-                    false_positives = total_wrong / total_identified * 100
-                    print('Overall accuracy for method: {}/{} ({:.1f}%)'.format(
-                        total_correct, total_annotated, accuracy)
+                    recall = total_correct / total_annotated * 100
+                    precision = total_correct / total_identified * 100
+                    print('Overall recall for method: {}/{} ({:.1f}%)'.format(
+                        total_correct, total_annotated, recall)
                         )
-                    print('Overall false positives for method: {}/{} ({:.1f}%)'.format(
-                        total_wrong, total_identified, false_positives)
+                    print('Overall precision for method: {}/{} ({:.1f}%)'.format(
+                        total_correct, total_identified, precision)
                         )
 
-                    writer.writerow([window, expanded, accuracy, false_positives,
+                    writer.writerow([window, expanded, recall, precision,
                         total_correct, total_annotated, total_wrong, total_identified])

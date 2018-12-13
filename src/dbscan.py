@@ -147,7 +147,7 @@ if __name__ == '__main__':
                     initiations += start
                     terminations += start
 
-                    n_val, n_test, correct, wrong, accuracy, false_positives = util.get_match_statistics(
+                    n_val, n_test, correct, wrong, recall, precision = util.get_match_statistics(
                         initiations, terminations, initiations_val, terminations_val, tol
                     )
                     stats[pair]['annotated'] += n_val
@@ -158,13 +158,13 @@ if __name__ == '__main__':
                     # Region statistics
                     print('\tIdentified: {}   {}'.format(initiations, terminations))
                     print('\tValidation: {}   {}'.format(initiations_val, terminations_val))
-                    print('\tAccuracy: {}/{} ({:.1f}%)'.format(correct, n_val, accuracy))
-                    print('\tFalse positives: {}/{} ({:.1f}%)'.format(wrong, n_test, false_positives))
+                    print('\tRecall: {}/{} ({:.1f}%)'.format(correct, n_val, recall))
+                    print('\tPrecision: {}/{} ({:.1f}%)'.format(correct, n_test, precision))
 
         # Save summary output statistics
         with open(SUMMARY_FILE, 'w') as f:
             writer = csv.writer(f, delimiter='\t')
-            writer.writerow(['eps', 'min samples', 'Accuracy (%)', 'False Positives (%)',
+            writer.writerow(['eps', 'min samples', 'Recall (%)', 'Precision (%)',
                 'Correct', 'Annotated', 'Wrong', 'Identified', util.get_git_hash()])\
 
             for (eps, min_samples), d in stats.items():
@@ -172,15 +172,15 @@ if __name__ == '__main__':
                 wrong = d['wrong']
                 identified = d['identified']
                 annotated = d['annotated']
-                accuracy = '{:.1f}'.format(correct / annotated * 100)
+                recall = '{:.1f}'.format(correct / annotated * 100)
                 if identified > 0:
-                    false_positive_percent = '{:.1f}'.format(wrong / identified * 100)
+                    precision = '{:.1f}'.format(correct / identified * 100)
                 else:
-                    false_positive_percent = 0
+                    precision = 0
 
-                print('Overall Accuracy: {}/{} ({}%)'.format(correct, annotated, accuracy))
-                print('Overall False positives: {}/{} ({}%)'.format(wrong, identified, false_positive_percent))
-                writer.writerow([eps, min_samples, accuracy, false_positive_percent,
+                print('Overall recall: {}/{} ({}%)'.format(correct, annotated, recall))
+                print('Overall precision: {}/{} ({}%)'.format(correct, identified, precision))
+                writer.writerow([eps, min_samples, recall, precision,
                     correct, annotated, wrong, identified])
 
     print('Completed in {:.1f} min'.format((time.time() - start_time) / 60))
